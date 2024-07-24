@@ -313,6 +313,14 @@ void Conductor::OnPeerDisconnected(int id) {
 }
 
 void Conductor::OnMessageFromPeer(int peer_id, const std::string& message) {
+  if (!signaling_thread_.get()) {
+    signaling_thread_ = rtc::Thread::CreateWithSocketServer();
+    signaling_thread_->Start();
+  }
+  signaling_thread_->PostTask([=] { OnMessageFromPeerOnSignallingThread(peer_id, message); });
+}
+
+void Conductor::OnMessageFromPeerOnSignallingThread(int peer_id, const std::string& message) {  
   RTC_DCHECK(peer_id_ == peer_id || peer_id_ == -1);
   RTC_DCHECK(!message.empty());
 

@@ -429,8 +429,10 @@ void GtkMainWnd::OnRedraw() {
     width_ = remote_renderer->width();
     height_ = remote_renderer->height();
 
-    if (!draw_buffer_.get()) {
-      draw_buffer_size_ = (width_ * height_ * 4) * 4;
+    int size = (width_ * height_ * 4) * 4;
+
+    if (!draw_buffer_.get() || size != draw_buffer_size_) {
+      draw_buffer_size_ = size;
       draw_buffer_.reset(new uint8_t[draw_buffer_size_]);
       gtk_widget_set_size_request(draw_area_, width_ * 2, height_ * 2);
     }
