@@ -441,6 +441,7 @@ void Conductor::OnServerConnectionFailure() {
 // MainWndCallback implementation.
 //
 
+// connect to signaling server, it calls PeerConnectionClient::Connect() function
 void Conductor::StartLogin(const std::string& server, int port) {
   if (client_->is_connected())
     return;

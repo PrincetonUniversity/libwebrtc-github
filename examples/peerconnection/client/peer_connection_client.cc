@@ -38,6 +38,7 @@ PeerConnectionClient::PeerConnectionClient()
 
 PeerConnectionClient::~PeerConnectionClient() = default;
 
+// uses sigslot
 void PeerConnectionClient::InitSocketSignals() {
   RTC_DCHECK(control_socket_.get() != NULL);
   RTC_DCHECK(hanging_get_.get() != NULL);
@@ -80,6 +81,7 @@ void PeerConnectionClient::Connect(const std::string& server,
   if (state_ != NOT_CONNECTED) {
     RTC_LOG(LS_WARNING)
         << "The client must not be connected before you can call Connect()";
+    // call Conductor::OnServerConnectionFailure to inform Conductor the connection failed
     callback_->OnServerConnectionFailure();
     return;
   }
@@ -92,15 +94,17 @@ void PeerConnectionClient::Connect(const std::string& server,
   if (port <= 0)
     port = kDefaultServerPort;
 
+  // Store server address and port to be used later.
   server_address_.SetIP(server);
   server_address_.SetPort(port);
   client_name_ = client_name;
 
+  // Resolve the address of the server IP.
   if (server_address_.IsUnresolvedIP()) {
     RTC_DCHECK_NE(state_, RESOLVING);
     RTC_DCHECK(!resolver_);
     state_ = RESOLVING;
-    resolver_ = std::make_unique<webrtc::AsyncDnsResolver>();
+    resolver_ = std::make_unique<webrtc::AsyncDnsResolver>(); // create a new AsyncDnsResolver
     resolver_->Start(server_address_,
                      [this] { OnResolveResult(resolver_->result()); });
   } else {
@@ -108,6 +112,7 @@ void PeerConnectionClient::Connect(const std::string& server,
   }
 }
 
+// After the domain name resolver AsyncDnsResolver finishes, it will callback to this function.
 void PeerConnectionClient::OnResolveResult(
     const webrtc::AsyncDnsResolverResult& result) {
   if (result.GetError() != 0) {
@@ -126,17 +131,27 @@ void PeerConnectionClient::OnResolveResult(
 }
 
 void PeerConnectionClient::DoConnect() {
+  // create async socket
+  // control_socket_ is used to actively send signaling messages to the signaling server; 
+  // hanging_get_ is used to request signaling messages from the signaling server, where 
+  // it sends a wait signal to the signaling server and waits for a response. 
+  // When the signaling server has messages to send to the client, it will return them 
+  // through this socket.
   control_socket_.reset(CreateClientSocket(server_address_.ipaddr().family()));
   hanging_get_.reset(CreateClientSocket(server_address_.ipaddr().family()));
   InitSocketSignals();
+
+  // PeerConnectionClient communicate with the server using HTTP.
+  // prepare the HTTP GET sign_in request
   char buffer[1024];
   snprintf(buffer, sizeof(buffer), "GET /sign_in?%s HTTP/1.0\r\n\r\n",
            client_name_.c_str());
   onconnect_data_ = buffer;
 
+  // initiate a connection to the server using the control socket
   bool ret = ConnectControlSocket();
   if (ret)
-    state_ = SIGNING_IN;
+    state_ = SIGNING_IN; // update the state to SIGNING_IN
   if (!ret) {
     callback_->OnServerConnectionFailure();
   }
@@ -211,6 +226,8 @@ void PeerConnectionClient::Close() {
 
 bool PeerConnectionClient::ConnectControlSocket() {
   RTC_DCHECK(control_socket_->GetState() == rtc::Socket::CS_CLOSED);
+
+  // send a connection request to the server
   int err = control_socket_->Connect(server_address_);
   if (err == SOCKET_ERROR) {
     Close();

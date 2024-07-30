@@ -130,25 +130,29 @@ bool MainWnd::IsWindow() {
   return wnd_ && ::IsWindow(wnd_) != FALSE;
 }
 
+// In the message handling loop, this function is first entered for processing 
+// before dispatching the message.
 bool MainWnd::PreTranslateMessage(MSG* msg) {
   bool ret = false;
   if (msg->message == WM_CHAR) {
-    if (msg->wParam == VK_TAB) {
+    if (msg->wParam == VK_TAB) {            // tab key
       HandleTabbing();
       ret = true;
-    } else if (msg->wParam == VK_RETURN) {
+    } else if (msg->wParam == VK_RETURN) {  // enter key
       OnDefaultAction();
       ret = true;
-    } else if (msg->wParam == VK_ESCAPE) {
+    } else if (msg->wParam == VK_ESCAPE) {  // esc key
       if (callback_) {
         if (ui_ == STREAMING) {
-          callback_->DisconnectFromCurrentPeer();
+          callback_->DisconnectFromCurrentPeer(); // if in streaming ui, disconnect the current connection
         } else {
-          callback_->DisconnectFromServer();
+          callback_->DisconnectFromServer();// if in peer_list ui, return to connect ui.
         }
       }
     }
   } else if (msg->hwnd == NULL && msg->message == UI_THREAD_CALLBACK) {
+    // If the message does not have a specific window and the message type is our custom type, 
+    // it indicates that the message was sent by the Conductor itself.
     callback_->UIThreadCallback(static_cast<int>(msg->wParam),
                                 reinterpret_cast<void*>(msg->lParam));
     ret = true;
@@ -248,6 +252,7 @@ void MainWnd::OnPaint() {
     int height = abs(bmi.bmiHeader.biHeight);
     int width = bmi.bmiHeader.biWidth;
 
+    // obtain remote video frame
     const uint8_t* image = remote_renderer->image();
     if (image != NULL) {
       HDC dc_mem = ::CreateCompatibleDC(ps.hdc);
@@ -280,6 +285,7 @@ void MainWnd::OnPaint() {
 
       if ((rc.right - rc.left) > 200 && (rc.bottom - rc.top) > 200) {
         const BITMAPINFO& bmi = local_renderer->bmi();
+        // obtain local video frame
         image = local_renderer->image();
         int thumb_width = bmi.bmiHeader.biWidth / 4;
         int thumb_height = abs(bmi.bmiHeader.biHeight) / 4;
@@ -333,16 +339,19 @@ void MainWnd::OnDestroyed() {
 void MainWnd::OnDefaultAction() {
   if (!callback_)
     return;
-  if (ui_ == CONNECT_TO_SERVER) {
+  if (ui_ == CONNECT_TO_SERVER) {  // in CONNECT_TO_SERVER UI, click connect button
     std::string server(GetWindowText(edit1_));
     std::string port_str(GetWindowText(edit2_));
     int port = port_str.length() ? atoi(port_str.c_str()) : 0;
-    callback_->StartLogin(server, port);
+    callback_->StartLogin(server, port); // callback conductor to login to signaling server
   } else if (ui_ == LIST_PEERS) {
-    LRESULT sel = ::SendMessage(listbox_, LB_GETCURSEL, 0, 0);
+    // LB_GETCURSEL is a message that retrieves the index of the currently selected item in a listbox.
+    LRESULT sel = ::SendMessage(listbox_, LB_GETCURSEL, 0, 0); 
     if (sel != LB_ERR) {
+      // LB_GETCURSEL retrieves the item data for a specific index in the listbox.
       LRESULT peer_id = ::SendMessage(listbox_, LB_GETITEMDATA, sel, 0);
       if (peer_id != -1 && callback_) {
+        // callback Conductor::ConnectToPeer, start p2p connection
         callback_->ConnectToPeer(peer_id);
       }
     }
@@ -358,7 +367,7 @@ bool MainWnd::OnMessage(UINT msg, WPARAM wp, LPARAM lp, LRESULT* result) {
       return true;
 
     case WM_PAINT:
-      OnPaint();
+      OnPaint(); // paint new video frame
       return true;
 
     case WM_SETFOCUS:
@@ -381,6 +390,13 @@ bool MainWnd::OnMessage(UINT msg, WPARAM wp, LPARAM lp, LRESULT* result) {
       *result = reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
       return true;
 
+    // The WM_COMMAND message is sent when the user interacts with a command item, 
+    // such as a menu item, control, or accelerator key. This message's wp parameter 
+    // contains notification code information, while lp contains the handle to the 
+    // control that sent the message.
+
+    // button_ and listbox_ are member variables of the MainWnd class, representing 
+    // the "connect" button and the peer list control (likely a listbox), respectively.
     case WM_COMMAND:
       if (button_ == reinterpret_cast<HWND>(lp)) {
         if (BN_CLICKED == HIWORD(wp))
@@ -392,10 +408,23 @@ bool MainWnd::OnMessage(UINT msg, WPARAM wp, LPARAM lp, LRESULT* result) {
       }
       return true;
 
+    // callback_ is a member variable of the MainWnd class that holds a pointer to an 
+    // object implementing a specific interface, which provides a callback mechanism. 
+    // This callback mechanism is typically used to notify or trigger actions in other 
+    // parts of the application when certain events occur in the window.
+
+    // Here in the context of the WebRTC peerconnection_client example, callback_ is 
+    // pointing to the Conductor, which handles the logic for the peer connection and 
+    // interactions with the signaling server. The Conductor class usually implements 
+    // methods that the main window can call to notify it of events like closing the window.
+
     case WM_CLOSE:
       if (callback_)
         callback_->Close();
-      break;
+      break; 
+      // After conductor finishes close(), this switch will break, and return false, 
+      // where the false will be passed to MainWnd::WndProc and then the message will 
+      // be passed to DefWindowProc().
   }
   return false;
 }
@@ -416,22 +445,22 @@ LRESULT CALLBACK MainWnd::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     void* prev_nested_msg = me->nested_msg_;
     me->nested_msg_ = &msg;
 
-    bool handled = me->OnMessage(msg, wp, lp, &result);
+    bool handled = me->OnMessage(msg, wp, lp, &result); // msg from peerconnect_client itself is handled by MainWnd::OnMessage
     if (WM_NCDESTROY == msg) {
       me->destroyed_ = true;
     } else if (!handled) {
-      result = ::DefWindowProc(hwnd, msg, wp, lp);
+      result = ::DefWindowProc(hwnd, msg, wp, lp); // if not handled by MainWnd::OnMessage, then pass it to DefWindowProc
     }
 
     if (me->destroyed_ && prev_nested_msg == NULL) {
-      me->OnDestroyed();
+      me->OnDestroyed(); // destroy the main window
       me->wnd_ = NULL;
       me->destroyed_ = false;
     }
 
     me->nested_msg_ = prev_nested_msg;
   } else {
-    result = ::DefWindowProc(hwnd, msg, wp, lp);
+    result = ::DefWindowProc(hwnd, msg, wp, lp); // other msg is handled by DefWindowProc
   }
 
   return result;
@@ -572,6 +601,10 @@ void MainWnd::HandleTabbing() {
 // MainWnd::VideoRenderer
 //
 
+// VideoRenderer inherits from the rtc::VideoSinkInterface<webrtc::VideoFrame> interface, 
+// allowing it to be registered with WebRTC.
+// In the constructor, it is registered with WebRTC through AddOrUpdateSink, 
+// and it is unregistered in the destructor.
 MainWnd::VideoRenderer::VideoRenderer(
     HWND wnd,
     int width,
@@ -610,10 +643,13 @@ void MainWnd::VideoRenderer::SetSize(int width, int height) {
   image_.reset(new uint8_t[bmi_.bmiHeader.biSizeImage]);
 }
 
+// When there is a video frame that needs to be rendered in WebRTC, it will be passed up 
+// through the OnFrame function.
 void MainWnd::VideoRenderer::OnFrame(const webrtc::VideoFrame& video_frame) {
   {
     AutoLock<VideoRenderer> lock(this);
 
+    // Convert the obtained video frames to YUV420 format.
     rtc::scoped_refptr<webrtc::I420BufferInterface> buffer(
         video_frame.video_frame_buffer()->ToI420());
     if (video_frame.rotation() != webrtc::kVideoRotation_0) {
@@ -623,11 +659,17 @@ void MainWnd::VideoRenderer::OnFrame(const webrtc::VideoFrame& video_frame) {
     SetSize(buffer->width(), buffer->height());
 
     RTC_DCHECK(image_.get() != NULL);
+
+    // Convert the YUV420 format to ARGB format, and save it in the image_ member variable.
     libyuv::I420ToARGB(buffer->DataY(), buffer->StrideY(), buffer->DataU(),
                        buffer->StrideU(), buffer->DataV(), buffer->StrideV(),
                        image_.get(),
                        bmi_.bmiHeader.biWidth * bmi_.bmiHeader.biBitCount / 8,
                        buffer->width(), buffer->height());
   }
+
+  // Trigger the WM_PAINT event.
   InvalidateRect(wnd_, NULL, TRUE);
+  // After the WM_PAINT event is triggered in VideoRenderer::OnFrame, the window event loop 
+  // will trigger the OnPaint() function to handle it.
 }
