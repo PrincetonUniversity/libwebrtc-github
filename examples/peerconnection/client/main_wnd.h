@@ -24,6 +24,7 @@
 #include "rtc_base/win32.h"
 #endif  // WEBRTC_WIN
 
+// Conductor receives info from MainWnd by overriding these virtual functions.
 class MainWndCallback {
  public:
   virtual void StartLogin(const std::string& server, int port) = 0;

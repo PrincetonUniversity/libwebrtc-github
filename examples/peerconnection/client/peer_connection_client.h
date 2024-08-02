@@ -23,6 +23,7 @@
 
 typedef std::map<int, std::string> Peers;
 
+// Conductor receives info from PeerConnectionClient by overriding these virtual functions.
 struct PeerConnectionClientObserver {
   virtual void OnSignedIn() = 0;  // Called when we're logged on.
   virtual void OnDisconnected() = 0;

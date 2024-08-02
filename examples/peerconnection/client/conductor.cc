@@ -62,6 +62,7 @@ const char kCandidateSdpName[] = "candidate";
 const char kSessionDescriptionTypeName[] = "type";
 const char kSessionDescriptionSdpName[] = "sdp";
 
+// Inherited from webrtc::SetSessionDescriptionObserver, override OnSuccess and OnFailure
 class DummySetSessionDescriptionObserver
     : public webrtc::SetSessionDescriptionObserver {
  public:
@@ -115,8 +116,8 @@ class CapturerTrackSource : public webrtc::VideoTrackSource {
 
 Conductor::Conductor(PeerConnectionClient* client, MainWindow* main_wnd)
     : peer_id_(-1), loopback_(false), client_(client), main_wnd_(main_wnd) {
-  client_->RegisterObserver(this);
-  main_wnd->RegisterObserver(this);
+  client_->RegisterObserver(this);  // register as observer of PeerConnectionClient
+  main_wnd->RegisterObserver(this); // register as observer of MainWindow
 }
 
 Conductor::~Conductor() {
@@ -127,8 +128,10 @@ bool Conductor::connection_active() const {
   return peer_connection_ != nullptr;
 }
 
+// To close the local program, first send a sign out signal to the signaling server, 
+// then destroy the PeerConnection object.
 void Conductor::Close() {
-  client_->SignOut();
+  client_->SignOut(); // send sign out signal to signaling server
   DeletePeerConnection();
 }
 
@@ -140,6 +143,7 @@ bool Conductor::InitializePeerConnection() {
     signaling_thread_ = rtc::Thread::CreateWithSocketServer();
     signaling_thread_->Start();
   }
+  // 1. create PeerConnectionFactory with audio and video codecs
   peer_connection_factory_ = webrtc::CreatePeerConnectionFactory(
       nullptr /* network_thread */, nullptr /* worker_thread */,
       signaling_thread_.get(), nullptr /* default_adm */,
@@ -164,11 +168,13 @@ bool Conductor::InitializePeerConnection() {
     return false;
   }
 
+  // 2. create PeerConnection
   if (!CreatePeerConnection()) {
     main_wnd_->MessageBox("Error", "CreatePeerConnection failed", true);
     DeletePeerConnection();
   }
 
+  // 3. add audio and video tracks
   AddTracks();
 
   return peer_connection_ != nullptr;
@@ -200,11 +206,14 @@ bool Conductor::CreatePeerConnection() {
   RTC_DCHECK(!peer_connection_);
 
   webrtc::PeerConnectionInterface::RTCConfiguration config;
+  // format of sdp
   config.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
+  // configure stun/turn server
   webrtc::PeerConnectionInterface::IceServer server;
   server.uri = GetPeerConnectionString();
   config.servers.push_back(server);
 
+  // create peer_connection_ object
   webrtc::PeerConnectionDependencies pc_dependencies(this);
   auto error_or_peer_connection =
       peer_connection_factory_->CreatePeerConnectionOrError(
@@ -236,11 +245,16 @@ void Conductor::EnsureStreamingUI() {
 // PeerConnectionObserver implementation.
 //
 
+// After the above steps (send offer, send candidate, etc.), 
+// the audio and video connection is established. 
+// When a remote video stream is received, 
+// the user will be notified through OnAddTrack().
 void Conductor::OnAddTrack(
     rtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver,
     const std::vector<rtc::scoped_refptr<webrtc::MediaStreamInterface>>&
         streams) {
   RTC_LOG(LS_INFO) << __FUNCTION__ << " " << receiver->id();
+  // send self-defined message NEW_TRACK_ADDED to MainWnd
   main_wnd_->QueueUIThreadCallback(NEW_TRACK_ADDED,
                                    receiver->track().release());
 }
@@ -251,6 +265,8 @@ void Conductor::OnRemoveTrack(
   main_wnd_->QueueUIThreadCallback(TRACK_REMOVED, receiver->track().release());
 }
 
+// After sending offer, caller will communicate ICE server to generate ice candidate, 
+// and then send the ice candidate to callee through signaling server.
 void Conductor::OnIceCandidate(const webrtc::IceCandidateInterface* candidate) {
   RTC_LOG(LS_INFO) << __FUNCTION__ << " " << candidate->sdp_mline_index();
   // For loopback test. To save some connecting delay.
@@ -261,6 +277,7 @@ void Conductor::OnIceCandidate(const webrtc::IceCandidateInterface* candidate) {
     return;
   }
 
+  // Package the ice candidate into JSON format.
   Json::Value jmessage;
   jmessage[kCandidateSdpMidName] = candidate->sdp_mid();
   jmessage[kCandidateSdpMlineIndexName] = candidate->sdp_mline_index();
@@ -271,6 +288,7 @@ void Conductor::OnIceCandidate(const webrtc::IceCandidateInterface* candidate) {
   }
   jmessage[kCandidateSdpName] = sdp;
 
+  // send the ice candidate to callee through signaling server
   Json::StreamWriterBuilder factory;
   SendMessage(Json::writeString(factory, jmessage));
 }
@@ -304,6 +322,7 @@ void Conductor::OnPeerDisconnected(int id) {
   RTC_LOG(LS_INFO) << __FUNCTION__;
   if (id == peer_id_) {
     RTC_LOG(LS_INFO) << "Our peer disconnected";
+    // inform the main_wnd_ that the peer connection is closed
     main_wnd_->QueueUIThreadCallback(PEER_CONNECTION_CLOSED, NULL);
   } else {
     // Refresh the list if we're showing it.
@@ -324,10 +343,12 @@ void Conductor::OnMessageFromPeerOnSignallingThread(int peer_id, const std::stri
   RTC_DCHECK(peer_id_ == peer_id || peer_id_ == -1);
   RTC_DCHECK(!message.empty());
 
+  // the callee hasn't create a PeerConnection object yet.
   if (!peer_connection_.get()) {
     RTC_DCHECK(peer_id_ == -1);
     peer_id_ = peer_id;
 
+    // create PeerConnection object
     if (!InitializePeerConnection()) {
       RTC_LOG(LS_ERROR) << "Failed to initialize our PeerConnection instance";
       client_->SignOut();
@@ -345,6 +366,7 @@ void Conductor::OnMessageFromPeerOnSignallingThread(int peer_id, const std::stri
   std::unique_ptr<Json::CharReader> reader =
       absl::WrapUnique(factory.newCharReader());
   Json::Value jmessage;
+  // parse the message to json object
   if (!reader->parse(message.data(), message.data() + message.length(),
                      &jmessage, nullptr)) {
     RTC_LOG(LS_WARNING) << "Received unknown message. " << message;
@@ -353,6 +375,7 @@ void Conductor::OnMessageFromPeerOnSignallingThread(int peer_id, const std::stri
   std::string type_str;
   std::string json_object;
 
+  // get the type of the message from json
   rtc::GetStringFromJsonObject(jmessage, kSessionDescriptionTypeName,
                                &type_str);
   if (!type_str.empty()) {
@@ -366,6 +389,7 @@ void Conductor::OnMessageFromPeerOnSignallingThread(int peer_id, const std::stri
       }
       return;
     }
+    // type of the message
     absl::optional<webrtc::SdpType> type_maybe =
         webrtc::SdpTypeFromString(type_str);
     if (!type_maybe) {
@@ -374,12 +398,16 @@ void Conductor::OnMessageFromPeerOnSignallingThread(int peer_id, const std::stri
     }
     webrtc::SdpType type = *type_maybe;
     std::string sdp;
+
+    // get the sdp from json, which is the offer here.
     if (!rtc::GetStringFromJsonObject(jmessage, kSessionDescriptionSdpName,
                                       &sdp)) {
       RTC_LOG(LS_WARNING)
           << "Can't parse received session description message.";
       return;
     }
+
+    // parse the sdp to SessionDescriptionInterface object, which is understandable by WebRTC
     webrtc::SdpParseError error;
     std::unique_ptr<webrtc::SessionDescriptionInterface> session_description =
         webrtc::CreateSessionDescription(type, sdp, &error);
@@ -391,17 +419,26 @@ void Conductor::OnMessageFromPeerOnSignallingThread(int peer_id, const std::stri
       return;
     }
     RTC_LOG(LS_INFO) << " Received session description :" << message;
+
+    // set the sdp to PeerConnection through SetRemoteDescription
     peer_connection_->SetRemoteDescription(
         DummySetSessionDescriptionObserver::Create().get(),
         session_description.release());
+
+    // after receiving the offer, create answer.
+    // CreateAnswer is also async, it will call OnSuccess or OnFailure when finishes.
     if (type == webrtc::SdpType::kOffer) {
       peer_connection_->CreateAnswer(
           this, webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
     }
   } else {
+
+    // handle the ice candidate message
     std::string sdp_mid;
     int sdp_mlineindex = 0;
     std::string sdp;
+
+    // parse the ice candidate message from json
     if (!rtc::GetStringFromJsonObject(jmessage, kCandidateSdpMidName,
                                       &sdp_mid) ||
         !rtc::GetIntFromJsonObject(jmessage, kCandidateSdpMlineIndexName,
@@ -411,6 +448,8 @@ void Conductor::OnMessageFromPeerOnSignallingThread(int peer_id, const std::stri
       return;
     }
     webrtc::SdpParseError error;
+
+    // generate IceCandidate object from received message
     std::unique_ptr<webrtc::IceCandidateInterface> candidate(
         webrtc::CreateIceCandidate(sdp_mid, sdp_mlineindex, sdp, &error));
     if (!candidate.get()) {
@@ -419,6 +458,8 @@ void Conductor::OnMessageFromPeerOnSignallingThread(int peer_id, const std::stri
                           << error.description;
       return;
     }
+
+    // apply the received candidate to PeerConnection
     if (!peer_connection_->AddIceCandidate(candidate.get())) {
       RTC_LOG(LS_WARNING) << "Failed to apply the received candidate";
       return;
@@ -454,10 +495,13 @@ void Conductor::DisconnectFromServer() {
     client_->SignOut();
 }
 
+// Clicking on a user ID in the peer_list ui will trigger this function. 
+// A crucial operation in this function is calling the CreateOffer() function.
 void Conductor::ConnectToPeer(int peer_id) {
   RTC_DCHECK(peer_id_ == -1);
   RTC_DCHECK(peer_id != -1);
-
+  
+  // if the peer_connection_ is not empty, return
   if (peer_connection_.get()) {
     main_wnd_->MessageBox(
         "Error", "We only support connecting to one peer at a time", true);
@@ -466,6 +510,7 @@ void Conductor::ConnectToPeer(int peer_id) {
 
   if (InitializePeerConnection()) {
     peer_id_ = peer_id;
+    // CreateOffer is asynchronous, it will call OnSuccess or OnFailure when finishes.
     peer_connection_->CreateOffer(
         this, webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
   } else {
@@ -478,24 +523,31 @@ void Conductor::AddTracks() {
     return;  // Already added tracks.
   }
 
+  // create audio track
   rtc::scoped_refptr<webrtc::AudioTrackInterface> audio_track(
       peer_connection_factory_->CreateAudioTrack(
           kAudioLabel,
           peer_connection_factory_->CreateAudioSource(cricket::AudioOptions())
               .get()));
+  // add audio track to PeerConnection
   auto result_or_error = peer_connection_->AddTrack(audio_track, {kStreamId});
   if (!result_or_error.ok()) {
     RTC_LOG(LS_ERROR) << "Failed to add audio track to PeerConnection: "
                       << result_or_error.error().message();
   }
 
+  // create video device
+  // uses webrtc::VideoCaptureFactory::CreateDeviceInfo() to get the video device info.
   rtc::scoped_refptr<CapturerTrackSource> video_device =
       CapturerTrackSource::Create();
   if (video_device) {
+    // create video track
     rtc::scoped_refptr<webrtc::VideoTrackInterface> video_track_(
         peer_connection_factory_->CreateVideoTrack(video_device, kVideoLabel));
+    // send video track to local renderer
     main_wnd_->StartLocalRenderer(video_track_.get());
 
+    // add video track to PeerConnection
     result_or_error = peer_connection_->AddTrack(video_track_, {kStreamId});
     if (!result_or_error.ok()) {
       RTC_LOG(LS_ERROR) << "Failed to add video track to PeerConnection: "
@@ -504,40 +556,46 @@ void Conductor::AddTracks() {
   } else {
     RTC_LOG(LS_ERROR) << "OpenVideoCaptureDevice failed";
   }
-
+  
+  // switch to streaming UI
   main_wnd_->SwitchToStreamingUI();
 }
 
+// Press esc key, and function GtkMainWnd::OnKeyPress captures this event.
 void Conductor::DisconnectFromCurrentPeer() {
   RTC_LOG(LS_INFO) << __FUNCTION__;
   if (peer_connection_.get()) {
-    client_->SendHangUp(peer_id_);
+    client_->SendHangUp(peer_id_);  // send bye signal to peer through server
     DeletePeerConnection();
   }
 
   if (main_wnd_->IsWindow())
-    main_wnd_->SwitchToPeerList(client_->peers());
+    main_wnd_->SwitchToPeerList(client_->peers());  // switch to peer_list UI
 }
 
+// After posting the message to MainWnd by Conductor::SendMessage, 
+// it will be handled in this function, which runs on the main thread.
 void Conductor::UIThreadCallback(int msg_id, void* data) {
   switch (msg_id) {
     case PEER_CONNECTION_CLOSED:
       RTC_LOG(LS_INFO) << "PEER_CONNECTION_CLOSED";
       DeletePeerConnection();
 
-      if (main_wnd_->IsWindow()) {
-        if (client_->is_connected()) {
+      if (main_wnd_->IsWindow()) {      // if in video streaming UI
+        if (client_->is_connected()) {  // if connected to signaling server, switch to peer_list UI
           main_wnd_->SwitchToPeerList(client_->peers());
         } else {
-          main_wnd_->SwitchToConnectUI();
+          main_wnd_->SwitchToConnectUI(); // siwtch to connect UI
         }
       } else {
         DisconnectFromServer();
       }
       break;
 
+    // send message to server
     case SEND_MESSAGE_TO_PEER: {
       RTC_LOG(LS_INFO) << "SEND_MESSAGE_TO_PEER";
+      // obtain message
       std::string* msg = reinterpret_cast<std::string*>(data);
       if (msg) {
         // For convenience, we always run the message through the queue.
@@ -546,10 +604,13 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
         pending_messages_.push_back(msg);
       }
 
+      // If there is a message to be sent and PeerConnectionClient 
+      // is available to send signaling.
       if (!pending_messages_.empty() && !client_->IsSendingMessage()) {
-        msg = pending_messages_.front();
+        msg = pending_messages_.front(); // obtain the message from the queue
         pending_messages_.pop_front();
 
+        // send message through PeerConnectionClient to server
         if (!client_->SendToPeer(peer_id_, *msg) && peer_id_ != -1) {
           RTC_LOG(LS_ERROR) << "SendToPeer failed";
           DisconnectFromServer();
@@ -566,7 +627,9 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
     case NEW_TRACK_ADDED: {
       auto* track = reinterpret_cast<webrtc::MediaStreamTrackInterface*>(data);
       if (track->kind() == webrtc::MediaStreamTrackInterface::kVideoKind) {
+        // obtain remote video track
         auto* video_track = static_cast<webrtc::VideoTrackInterface*>(track);
+        // send remote video track to main_wnd_ renderer
         main_wnd_->StartRemoteRenderer(video_track);
       }
       track->Release();
@@ -586,12 +649,18 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
   }
 }
 
+// After WebRTC generates an offer, it will be passed back through this callback 
+// function. In this function, the offer will be formatted into a JSON message, 
+// and then the SendMessage function will be called to send the message.
 void Conductor::OnSuccess(webrtc::SessionDescriptionInterface* desc) {
+  // The generated offer needs to be set in the PeerConnection using SetLocalDescription.
+  // SetLocalDescription is also an async operation, 
+  // will call DummySetSessionDescriptionObserver::OnSuccess when finished.
   peer_connection_->SetLocalDescription(
       DummySetSessionDescriptionObserver::Create().get(), desc);
 
   std::string sdp;
-  desc->ToString(&sdp);
+  desc->ToString(&sdp);  // desc is the offer, it is formatted into a string
 
   // For loopback test. To save some connecting delay.
   if (loopback_) {
@@ -604,20 +673,28 @@ void Conductor::OnSuccess(webrtc::SessionDescriptionInterface* desc) {
     return;
   }
 
+  // Package the offer into JSON format.
   Json::Value jmessage;
   jmessage[kSessionDescriptionTypeName] =
       webrtc::SdpTypeToString(desc->GetType());
   jmessage[kSessionDescriptionSdpName] = sdp;
 
   Json::StreamWriterBuilder factory;
+  // send the offer signal to the server
   SendMessage(Json::writeString(factory, jmessage));
 }
 
+// if the offer generation fails, this function will be called.
 void Conductor::OnFailure(webrtc::RTCError error) {
   RTC_LOG(LS_ERROR) << ToString(error.type()) << ": " << error.message();
 }
 
+// At this point, it is still within the WebRTC internal thread, 
+// but the signaling must be sent by the main thread. Therefore, 
+// the signaling to be sent is posted to MainWnd, allowing it 
+// to send the signaling.
 void Conductor::SendMessage(const std::string& json_object) {
   std::string* msg = new std::string(json_object);
+  // message type is SEND_MESSAGE_TO_PEER
   main_wnd_->QueueUIThreadCallback(SEND_MESSAGE_TO_PEER, msg);
 }

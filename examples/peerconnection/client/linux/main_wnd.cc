@@ -208,8 +208,11 @@ void GtkMainWnd::StopLocalRenderer() {
   local_renderer_.reset();
 }
 
+// In this function, remote_renderer_ from MainWnd will be added to WebRTC 
+// to receive and render remote video frames.
 void GtkMainWnd::StartRemoteRenderer(
     webrtc::VideoTrackInterface* remote_video) {
+  // Generate a remote video renderer and register it with WebRTC.
   remote_renderer_.reset(new VideoRenderer(this, remote_video));
 }
 
@@ -217,6 +220,7 @@ void GtkMainWnd::StopRemoteRenderer() {
   remote_renderer_.reset();
 }
 
+// HandleUIThreadCallback points to Conductor::UIThreadCallback
 void GtkMainWnd::QueueUIThreadCallback(int msg_id, void* data) {
   g_idle_add(HandleUIThreadCallback,
              new UIThreadCallbackData(callback_, msg_id, data));
@@ -315,6 +319,7 @@ void GtkMainWnd::SwitchToPeerList(const Peers& peers) {
       draw_buffer_.reset();
     }
 
+    // wait for enter key press, or row click
     peer_list_ = gtk_tree_view_new();
     g_signal_connect(peer_list_, "row-activated",
                      G_CALLBACK(OnRowActivatedCallback), this);
@@ -413,9 +418,10 @@ void GtkMainWnd::OnRowActivated(GtkTreeView* tree_view,
   if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
     char* text;
     int id = -1;
+    // get the clicked peer_id
     gtk_tree_model_get(model, &iter, 0, &text, 1, &id, -1);
     if (id != -1)
-      callback_->ConnectToPeer(id);
+      callback_->ConnectToPeer(id); // call the Conductor::ConnectToPeer
     g_free(text);
   }
 }
