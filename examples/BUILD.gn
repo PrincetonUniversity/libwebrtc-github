@@ -748,6 +748,18 @@ if (is_linux || is_chromeos || is_win) {
         "gtk+-3.0",
       ]
     }
+    #config("opencv_config") {
+    #  include_dirs = [ "/usr/include/opencv4" ]
+    #  libs = [
+    #    "opencv_core",
+    #    "opencv_imgproc",
+    #    "opencv_highgui",
+    #    "opencv_imgcodecs",
+    #    "opencv_videoio",
+    #    # Add other OpenCV modules as needed
+    #  ]
+    #  lib_dirs = [ "/usr/lib/x86_64-linux-gnu" ]
+    #} 
   }
 
   rtc_executable("peerconnection_client") {
@@ -827,8 +839,19 @@ if (is_linux || is_chromeos || is_win) {
         "Xcomposite",
         "Xext",
         "Xrender",
+        # Add the OpenCV libraries here
+        #"opencv_core",
+        #"opencv_imgproc",
+        #"opencv_highgui",
+        #"opencv_imgcodecs",
+        #"opencv_videoio",
+        # Add more OpenCV modules if necessary       
+      ]    
+
+      configs += [
+        ":gtk_config",
+      #  ":opencv_config",
       ]
-      configs += [ ":gtk_config" ]
     }
 
     deps += [

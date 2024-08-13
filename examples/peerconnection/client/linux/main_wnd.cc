@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <map>
 #include <utility>
+#include <cstdio>
 
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame_buffer.h"
@@ -32,8 +33,16 @@
 #include "api/video/video_source_interface.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/time_utils.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/libyuv/include/libyuv/convert_from.h"
+#include "third_party/libyuv/include/libyuv.h"
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libswscale/swscale.h>
+}
 
 namespace {
 
