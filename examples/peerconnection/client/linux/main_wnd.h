@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <string>
+#include <cstdio>
 
 #include "api/media_stream_interface.h"
 #include "api/scoped_refptr.h"
@@ -47,9 +48,9 @@ class GtkMainWnd : public MainWindow {
   virtual void SwitchToStreamingUI();
   virtual void MessageBox(const char* caption, const char* text, bool is_error);
   virtual MainWindow::UI current_ui();
-  virtual void StartLocalRenderer(webrtc::VideoTrackInterface* local_video);
+  virtual void StartLocalRenderer(webrtc::VideoTrackInterface* local_video, int peer_id);
   virtual void StopLocalRenderer();
-  virtual void StartRemoteRenderer(webrtc::VideoTrackInterface* remote_video);
+  virtual void StartRemoteRenderer(webrtc::VideoTrackInterface* remote_video, int peer_id);
   virtual void StopRemoteRenderer();
 
   virtual void QueueUIThreadCallback(int msg_id, void* data);
@@ -82,27 +83,38 @@ class GtkMainWnd : public MainWindow {
 
  protected:
   class VideoRenderer : public rtc::VideoSinkInterface<webrtc::VideoFrame> {
-   public:
+  public:
     VideoRenderer(GtkMainWnd* main_wnd,
-                  webrtc::VideoTrackInterface* track_to_render);
+                  webrtc::VideoTrackInterface* track_to_render, 
+                  int peer_id,
+                  bool save_enabled = false);
     virtual ~VideoRenderer();
 
     // VideoSinkInterface implementation
     void OnFrame(const webrtc::VideoFrame& frame) override;
-
     const uint8_t* image() const { return image_.get(); }
-
     int width() const { return width_; }
-
     int height() const { return height_; }
 
-   protected:
+  protected:
     void SetSize(int width, int height);
+    bool InitializeYUVFile();
+    void CloseYUVFile();
+    bool SaveYUVFrame(const rtc::scoped_refptr<webrtc::I420BufferInterface>& buffer);
+
     std::unique_ptr<uint8_t[]> image_;
     int width_;
     int height_;
     GtkMainWnd* main_wnd_;
     rtc::scoped_refptr<webrtc::VideoTrackInterface> rendered_track_;
+    int peer_id_;  
+    FILE* yuv_file_;
+    FILE* metadata_file_;
+    int frame_count_;
+    bool save_enabled_;
+    int64_t frame_timestamp_;    
+
+    std::string GetOutputFilename() const;
   };
 
  protected:

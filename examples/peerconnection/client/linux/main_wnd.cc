@@ -23,9 +23,10 @@
 #include <string.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <utility>
-#include <cstdio>
+#include <sys/stat.h>
 
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame_buffer.h"
@@ -38,11 +39,7 @@
 #include "third_party/libyuv/include/libyuv/convert_from.h"
 #include "third_party/libyuv/include/libyuv.h"
 
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libswscale/swscale.h>
-}
+
 
 namespace {
 
@@ -209,8 +206,8 @@ MainWindow::UI GtkMainWnd::current_ui() {
   return STREAMING;
 }
 
-void GtkMainWnd::StartLocalRenderer(webrtc::VideoTrackInterface* local_video) {
-  local_renderer_.reset(new VideoRenderer(this, local_video));
+void GtkMainWnd::StartLocalRenderer(webrtc::VideoTrackInterface* local_video, int peer_id) {
+  local_renderer_.reset(new VideoRenderer(this, local_video, peer_id, false));
 }
 
 void GtkMainWnd::StopLocalRenderer() {
@@ -220,9 +217,9 @@ void GtkMainWnd::StopLocalRenderer() {
 // In this function, remote_renderer_ from MainWnd will be added to WebRTC 
 // to receive and render remote video frames.
 void GtkMainWnd::StartRemoteRenderer(
-    webrtc::VideoTrackInterface* remote_video) {
+    webrtc::VideoTrackInterface* remote_video, int peer_id) {
   // Generate a remote video renderer and register it with WebRTC.
-  remote_renderer_.reset(new VideoRenderer(this, remote_video));
+  remote_renderer_.reset(new VideoRenderer(this, remote_video, peer_id, true));
 }
 
 void GtkMainWnd::StopRemoteRenderer() {
@@ -242,6 +239,7 @@ bool GtkMainWnd::Create() {
   if (window_) {
     gtk_window_set_position(GTK_WINDOW(window_), GTK_WIN_POS_CENTER);
     gtk_window_set_default_size(GTK_WINDOW(window_), 640, 480);
+    gtk_window_set_resizable(GTK_WINDOW(window_), FALSE);  // Make window non-resizable
     gtk_window_set_title(GTK_WINDOW(window_), "PeerConnection client");
     g_signal_connect(G_OBJECT(window_), "delete-event",
                      G_CALLBACK(&OnDestroyedCallback), this);
@@ -435,6 +433,7 @@ void GtkMainWnd::OnRowActivated(GtkTreeView* tree_view,
   }
 }
 
+
 // void GtkMainWnd::OnRedraw() {
 //   gdk_threads_enter();
 
@@ -502,54 +501,37 @@ void GtkMainWnd::OnRedraw() {
   VideoRenderer* remote_renderer = remote_renderer_.get();
   if (remote_renderer && remote_renderer->image() != NULL &&
       draw_area_ != NULL) {
-    width_ = remote_renderer->width();
-    height_ = remote_renderer->height();
+    int window_width, window_height;
+    gtk_window_get_size(GTK_WINDOW(window_), &window_width, &window_height);
 
-    int size = (width_ * height_ * 4) * 4;
+    // Calculate scaling factors
+    float scale_x = static_cast<float>(window_width) / remote_renderer->width();
+    float scale_y = static_cast<float>(window_height) / remote_renderer->height();
+    float scale = std::min(scale_x, scale_y);  // Maintain aspect ratio
 
-    if (!draw_buffer_.get() || size != draw_buffer_size_) {
-      draw_buffer_size_ = size;
-      draw_buffer_.reset(new uint8_t[draw_buffer_size_]);
-      gtk_widget_set_size_request(draw_area_, width_ * 2, height_ * 2);
+    int scaled_width = static_cast<int>(remote_renderer->width() * scale);
+    int scaled_height = static_cast<int>(remote_renderer->height() * scale);
+
+    if (!draw_buffer_.get() || scaled_width != width_ || scaled_height != height_) {
+      width_ = scaled_width;
+      height_ = scaled_height;
+      draw_buffer_.reset(new uint8_t[width_ * height_ * 4]);
+      gtk_widget_set_size_request(draw_area_, width_, height_);
     }
 
-    const uint32_t* image =
-        reinterpret_cast<const uint32_t*>(remote_renderer->image());
+    const uint32_t* image = reinterpret_cast<const uint32_t*>(remote_renderer->image());
     uint32_t* scaled = reinterpret_cast<uint32_t*>(draw_buffer_.get());
-    for (int r = 0; r < height_; ++r) {
-      for (int c = 0; c < width_; ++c) {
-        int x = c * 2;
-        scaled[x] = scaled[x + 1] = image[c];
-      }
 
-      uint32_t* prev_line = scaled;
-      scaled += width_ * 2;
-      memcpy(scaled, prev_line, (width_ * 2) * 4);
-
-      image += width_;
-      scaled += width_ * 2;
-    }
-
-    VideoRenderer* local_renderer = local_renderer_.get();
-    if (local_renderer && local_renderer->image()) {
-      image = reinterpret_cast<const uint32_t*>(local_renderer->image());
-      scaled = reinterpret_cast<uint32_t*>(draw_buffer_.get());
-      // Position the local preview on the right side.
-      scaled += (width_ * 2) - (local_renderer->width() / 2);
-      // right margin...
-      scaled -= 10;
-      // ... towards the bottom.
-      scaled += (height_ * width_ * 4) - ((local_renderer->height() / 2) *
-                                          (local_renderer->width() / 2) * 4);
-      // bottom margin...
-      scaled -= (width_ * 2) * 5;
-      for (int r = 0; r < local_renderer->height(); r += 2) {
-        for (int c = 0; c < local_renderer->width(); c += 2) {
-          scaled[c / 2] = image[c + r * local_renderer->width()];
-        }
-        scaled += width_ * 2;
+    // Scale the image
+    for (int y = 0; y < height_; ++y) {
+      for (int x = 0; x < width_; ++x) {
+        int src_x = static_cast<int>(x / scale);
+        int src_y = static_cast<int>(y / scale);
+        scaled[y * width_ + x] = image[src_y * remote_renderer->width() + src_x];
       }
     }
+
+    // Handle local renderer scaling similarly...
 
     gtk_widget_queue_draw(draw_area_);
   }
@@ -557,41 +539,81 @@ void GtkMainWnd::OnRedraw() {
   gdk_threads_leave();
 }
 
+
+// void GtkMainWnd::Draw(GtkWidget* widget, cairo_t* cr) {
+//   cairo_format_t format = CAIRO_FORMAT_ARGB32;
+//   cairo_surface_t* surface = cairo_image_surface_create_for_data(
+//       draw_buffer_.get(), format, width_ * 2, height_ * 2,
+//       cairo_format_stride_for_width(format, width_ * 2));
+//   cairo_set_source_surface(cr, surface, 0, 0);
+//   cairo_rectangle(cr, 0, 0, width_ * 2, height_ * 2);
+//   cairo_fill(cr);
+//   cairo_surface_destroy(surface);
+// }
+
 void GtkMainWnd::Draw(GtkWidget* widget, cairo_t* cr) {
-  cairo_format_t format = CAIRO_FORMAT_ARGB32;
+  int window_width, window_height;
+  gtk_window_get_size(GTK_WINDOW(window_), &window_width, &window_height);
+
+  int x_offset = (window_width - width_) / 2;
+  int y_offset = (window_height - height_) / 2;
+
+  cairo_set_source_rgb(cr, 0, 0, 0);  // Set background color to black
+  cairo_paint(cr);  // Fill the entire window with the background color
+
   cairo_surface_t* surface = cairo_image_surface_create_for_data(
-      draw_buffer_.get(), format, width_ * 2, height_ * 2,
-      cairo_format_stride_for_width(format, width_ * 2));
-  cairo_set_source_surface(cr, surface, 0, 0);
-  cairo_rectangle(cr, 0, 0, width_ * 2, height_ * 2);
-  cairo_fill(cr);
+      draw_buffer_.get(), CAIRO_FORMAT_RGB24, width_, height_, width_ * 4);
+  cairo_set_source_surface(cr, surface, x_offset, y_offset);
+  cairo_paint(cr);
   cairo_surface_destroy(surface);
 }
 
+
 GtkMainWnd::VideoRenderer::VideoRenderer(
     GtkMainWnd* main_wnd,
-    webrtc::VideoTrackInterface* track_to_render)
+    webrtc::VideoTrackInterface* track_to_render, 
+    int peer_id,
+    bool save_enabled)
     : width_(0),
       height_(0),
       main_wnd_(main_wnd),
-      rendered_track_(track_to_render) {
+      rendered_track_(track_to_render),
+      peer_id_(peer_id), 
+      yuv_file_(nullptr),
+      metadata_file_(nullptr),
+      frame_count_(0),
+      save_enabled_(save_enabled),
+      frame_timestamp_(0) {
   rendered_track_->AddOrUpdateSink(this, rtc::VideoSinkWants());
+  if (save_enabled_) {
+    if (!InitializeYUVFile()) {
+      RTC_LOG(LS_ERROR) << "Failed to initialize YUV file";
+      save_enabled_ = false;
+    }
+  }
 }
 
 GtkMainWnd::VideoRenderer::~VideoRenderer() {
   rendered_track_->RemoveSink(this);
+  if (save_enabled_) {
+    CloseYUVFile();
+  }
 }
 
 void GtkMainWnd::VideoRenderer::SetSize(int width, int height) {
   gdk_threads_enter();
 
   if (width_ == width && height_ == height) {
+    gdk_threads_leave();
     return;
   }
 
+  RTC_LOG(LS_INFO) << "Video size changed: " << width_ << "x" << height_ << " -> " << width << "x" << height;  
+
   width_ = width;
   height_ = height;
-  image_.reset(new uint8_t[width * height * 4]);
+  image_.reset(new uint8_t[width * height * 4]); 
+
   gdk_threads_leave();
 }
 
@@ -605,19 +627,88 @@ void GtkMainWnd::VideoRenderer::OnFrame(const webrtc::VideoFrame& video_frame) {
   }
   SetSize(buffer->width(), buffer->height());
 
-  // TODO(bugs.webrtc.org/6857): This conversion is correct for little-endian
-  // only. Cairo ARGB32 treats pixels as 32-bit values in *native* byte order,
-  // with B in the least significant byte of the 32-bit value. Which on
-  // little-endian means that memory layout is BGRA, with the B byte stored at
-  // lowest address. Libyuv's ARGB format (surprisingly?) uses the same
-  // little-endian format, with B in the first byte in memory, regardless of
-  // native endianness.
   libyuv::I420ToARGB(buffer->DataY(), buffer->StrideY(), buffer->DataU(),
                      buffer->StrideU(), buffer->DataV(), buffer->StrideV(),
                      image_.get(), width_ * 4, buffer->width(),
                      buffer->height());
 
+  if (save_enabled_) {
+    SaveYUVFrame(buffer);
+  }
+
   gdk_threads_leave();
 
   g_idle_add(Redraw, main_wnd_);
+}
+
+bool GtkMainWnd::VideoRenderer::InitializeYUVFile() {
+  std::string filename = GetOutputFilename();
+  yuv_file_ = fopen(filename.c_str(), "wb");
+  if (!yuv_file_) {
+    RTC_LOG(LS_ERROR) << "Could not open YUV file for writing: " << filename;
+    return false;
+  }
+
+  std::string metadata_filename = filename + ".meta";
+  metadata_file_ = fopen(metadata_filename.c_str(), "w");
+  if (!metadata_file_) {
+    RTC_LOG(LS_ERROR) << "Could not open metadata file for writing: " << metadata_filename;
+    fclose(yuv_file_);
+    return false;
+  }
+
+  frame_timestamp_ = rtc::TimeMillis();
+  return true;
+}
+
+void GtkMainWnd::VideoRenderer::CloseYUVFile() {
+  if (yuv_file_) {
+    fclose(yuv_file_);
+    yuv_file_ = nullptr;
+  }
+  if (metadata_file_) {
+    fclose(metadata_file_);
+    metadata_file_ = nullptr;
+  }
+}
+
+bool GtkMainWnd::VideoRenderer::SaveYUVFrame(const rtc::scoped_refptr<webrtc::I420BufferInterface>& buffer) {
+  if (!yuv_file_ || !metadata_file_) {
+    return false;
+  }
+
+  size_t y_size = buffer->width() * buffer->height();
+  size_t uv_size = y_size / 4;
+
+  // Write YUV data
+  if (fwrite(buffer->DataY(), 1, y_size, yuv_file_) != y_size ||
+      fwrite(buffer->DataU(), 1, uv_size, yuv_file_) != uv_size ||
+      fwrite(buffer->DataV(), 1, uv_size, yuv_file_) != uv_size) {
+    RTC_LOG(LS_ERROR) << "Error writing YUV data";
+    return false;
+  }
+
+  // Write metadata
+  int64_t current_timestamp = rtc::TimeMillis();
+  fprintf(metadata_file_, "%ld,%d,%d\n", 
+          static_cast<long>(current_timestamp - frame_timestamp_), buffer->width(), buffer->height());
+  
+  frame_timestamp_ = current_timestamp;
+  frame_count_++;
+  return true;
+}
+
+std::string GtkMainWnd::VideoRenderer::GetOutputFilename() const {
+  const char* home_dir = std::getenv("HOME");
+  if (!home_dir) {
+    RTC_LOG(LS_ERROR) << "Unable to get HOME directory";
+    return "";
+  }
+
+  std::string video_dir = std::string(home_dir) + "/video";
+  mkdir(video_dir.c_str(), 0755);  // Create directory if it doesn't exist
+
+  char filename[256];
+  snprintf(filename, sizeof(filename), "%s/output%d.yuv", video_dir.c_str(), peer_id_);
+  return std::string(filename);
 }

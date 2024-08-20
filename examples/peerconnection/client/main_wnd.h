@@ -62,10 +62,10 @@ class MainWindow {
   virtual void SwitchToPeerList(const Peers& peers) = 0;
   virtual void SwitchToStreamingUI() = 0;
 
-  virtual void StartLocalRenderer(webrtc::VideoTrackInterface* local_video) = 0;
+  virtual void StartLocalRenderer(webrtc::VideoTrackInterface* local_video, int peer_id) = 0;
   virtual void StopLocalRenderer() = 0;
   virtual void StartRemoteRenderer(
-      webrtc::VideoTrackInterface* remote_video) = 0;
+      webrtc::VideoTrackInterface* remote_video, int peer_id) = 0;
   virtual void StopRemoteRenderer() = 0;
 
   virtual void QueueUIThreadCallback(int msg_id, void* data) = 0;

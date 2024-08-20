@@ -123,6 +123,7 @@ class Conductor : public webrtc::PeerConnectionObserver,
   // Send a message to the remote peer.
   void SendMessage(const std::string& json_object);
 
+  // the id of the remote peer
   int peer_id_;
   bool loopback_;
   std::unique_ptr<rtc::Thread> signaling_thread_;

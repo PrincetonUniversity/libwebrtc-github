@@ -545,7 +545,7 @@ void Conductor::AddTracks() {
     rtc::scoped_refptr<webrtc::VideoTrackInterface> video_track_(
         peer_connection_factory_->CreateVideoTrack(video_device, kVideoLabel));
     // send video track to local renderer
-    main_wnd_->StartLocalRenderer(video_track_.get());
+    main_wnd_->StartLocalRenderer(video_track_.get(), peer_id_);
 
     // add video track to PeerConnection
     result_or_error = peer_connection_->AddTrack(video_track_, {kStreamId});
@@ -630,7 +630,7 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
         // obtain remote video track
         auto* video_track = static_cast<webrtc::VideoTrackInterface*>(track);
         // send remote video track to main_wnd_ renderer
-        main_wnd_->StartRemoteRenderer(video_track);
+        main_wnd_->StartRemoteRenderer(video_track, peer_id_);
       }
       track->Release();
       break;

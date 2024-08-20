@@ -748,18 +748,14 @@ if (is_linux || is_chromeos || is_win) {
         "gtk+-3.0",
       ]
     }
-    #config("opencv_config") {
-    #  include_dirs = [ "/usr/include/opencv4" ]
-    #  libs = [
-    #    "opencv_core",
-    #    "opencv_imgproc",
-    #    "opencv_highgui",
-    #    "opencv_imgcodecs",
-    #    "opencv_videoio",
-    #    # Add other OpenCV modules as needed
-    #  ]
-    #  lib_dirs = [ "/usr/lib/x86_64-linux-gnu" ]
-    #} 
+    # Add a new pkg-config for FFmpeg
+    pkg_config("ffmpeg_config") {
+      packages = [
+        "libavcodec",
+        "libavformat",
+        "libavutil",
+      ]
+    }    
   }
 
   rtc_executable("peerconnection_client") {
@@ -838,19 +834,12 @@ if (is_linux || is_chromeos || is_win) {
         "X11",
         "Xcomposite",
         "Xext",
-        "Xrender",
-        # Add the OpenCV libraries here
-        #"opencv_core",
-        #"opencv_imgproc",
-        #"opencv_highgui",
-        #"opencv_imgcodecs",
-        #"opencv_videoio",
-        # Add more OpenCV modules if necessary       
+        "Xrender",    
       ]    
 
       configs += [
         ":gtk_config",
-      #  ":opencv_config",
+        ":ffmpeg_config",  # Add FFmpeg config for Linux
       ]
     }
 
@@ -881,6 +870,11 @@ if (is_linux || is_chromeos || is_win) {
       "//third_party/abseil-cpp/absl/flags:parse",
       "//third_party/libyuv",
     ]
+
+    # Add FFmpeg libraries as dependencies
+    deps += [
+      "//third_party/ffmpeg",
+    ]    
   }
 
   rtc_executable("peerconnection_server") {
