@@ -206,8 +206,8 @@ MainWindow::UI GtkMainWnd::current_ui() {
   return STREAMING;
 }
 
-void GtkMainWnd::StartLocalRenderer(webrtc::VideoTrackInterface* local_video, int peer_id) {
-  local_renderer_.reset(new VideoRenderer(this, local_video, peer_id, false));
+void GtkMainWnd::StartLocalRenderer(webrtc::VideoTrackInterface* local_video, int my_id) {
+  local_renderer_.reset(new VideoRenderer(this, local_video, my_id, false));
 }
 
 void GtkMainWnd::StopLocalRenderer() {
@@ -217,9 +217,9 @@ void GtkMainWnd::StopLocalRenderer() {
 // In this function, remote_renderer_ from MainWnd will be added to WebRTC 
 // to receive and render remote video frames.
 void GtkMainWnd::StartRemoteRenderer(
-    webrtc::VideoTrackInterface* remote_video, int peer_id) {
+    webrtc::VideoTrackInterface* remote_video, int my_id) {
   // Generate a remote video renderer and register it with WebRTC.
-  remote_renderer_.reset(new VideoRenderer(this, remote_video, peer_id, true));
+  remote_renderer_.reset(new VideoRenderer(this, remote_video, my_id, true));
 }
 
 void GtkMainWnd::StopRemoteRenderer() {
@@ -434,67 +434,6 @@ void GtkMainWnd::OnRowActivated(GtkTreeView* tree_view,
 }
 
 
-// void GtkMainWnd::OnRedraw() {
-//   gdk_threads_enter();
-
-//   VideoRenderer* remote_renderer = remote_renderer_.get();
-//   if (remote_renderer && remote_renderer->image() != NULL &&
-//       draw_area_ != NULL) {
-//     width_ = remote_renderer->width();
-//     height_ = remote_renderer->height();
-
-//     int size = (width_ * height_ * 4) * 4;
-
-//     if (!draw_buffer_.get() || size != draw_buffer_size_) {
-//       draw_buffer_size_ = size;
-//       draw_buffer_.reset(new uint8_t[draw_buffer_size_]);
-//       gtk_widget_set_size_request(draw_area_, width_ * 2, height_ * 2);
-//     }
-
-//     const uint32_t* image =
-//         reinterpret_cast<const uint32_t*>(remote_renderer->image());
-//     uint32_t* scaled = reinterpret_cast<uint32_t*>(draw_buffer_.get());
-//     for (int r = 0; r < height_; ++r) {
-//       for (int c = 0; c < width_; ++c) {
-//         int x = c * 2;
-//         scaled[x] = scaled[x + 1] = image[c];
-//       }
-
-//       uint32_t* prev_line = scaled;
-//       scaled += width_ * 2;
-//       memcpy(scaled, prev_line, (width_ * 2) * 4);
-
-//       image += width_;
-//       scaled += width_ * 2;
-//     }
-
-//     VideoRenderer* local_renderer = local_renderer_.get();
-//     if (local_renderer && local_renderer->image()) {
-//       image = reinterpret_cast<const uint32_t*>(local_renderer->image());
-//       scaled = reinterpret_cast<uint32_t*>(draw_buffer_.get());
-//       // Position the local preview on the right side.
-//       scaled += (width_ * 2) - (local_renderer->width() / 2);
-//       // right margin...
-//       scaled -= 10;
-//       // ... towards the bottom.
-//       scaled += (height_ * width_ * 4) - ((local_renderer->height() / 2) *
-//                                           (local_renderer->width() / 2) * 4);
-//       // bottom margin...
-//       scaled -= (width_ * 2) * 5;
-//       for (int r = 0; r < local_renderer->height(); r += 2) {
-//         for (int c = 0; c < local_renderer->width(); c += 2) {
-//           scaled[c / 2] = image[c + r * local_renderer->width()];
-//         }
-//         scaled += width_ * 2;
-//       }
-//     }
-
-//     gtk_widget_queue_draw(draw_area_);
-//   }
-
-//   gdk_threads_leave();
-// }
-
 void GtkMainWnd::OnRedraw() {
   gdk_threads_enter();
 
@@ -539,17 +478,6 @@ void GtkMainWnd::OnRedraw() {
   gdk_threads_leave();
 }
 
-
-// void GtkMainWnd::Draw(GtkWidget* widget, cairo_t* cr) {
-//   cairo_format_t format = CAIRO_FORMAT_ARGB32;
-//   cairo_surface_t* surface = cairo_image_surface_create_for_data(
-//       draw_buffer_.get(), format, width_ * 2, height_ * 2,
-//       cairo_format_stride_for_width(format, width_ * 2));
-//   cairo_set_source_surface(cr, surface, 0, 0);
-//   cairo_rectangle(cr, 0, 0, width_ * 2, height_ * 2);
-//   cairo_fill(cr);
-//   cairo_surface_destroy(surface);
-// }
 
 void GtkMainWnd::Draw(GtkWidget* widget, cairo_t* cr) {
   int window_width, window_height;

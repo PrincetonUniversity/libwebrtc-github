@@ -52,6 +52,11 @@
 #include "rtc_base/strings/json.h"
 #include "test/vcm_capturer.h"
 
+#include <chrono>
+#include "examples/peerconnection/client/csv_writer.h"
+#include "api/stats/rtc_stats_report.h"
+#include "api/stats/rtcstats_objects.h"
+
 namespace {
 // Names used for a IceCandidate JSON object.
 const char kCandidateSdpMidName[] = "sdpMid";
@@ -112,16 +117,30 @@ class CapturerTrackSource : public webrtc::VideoTrackSource {
   std::unique_ptr<webrtc::test::VcmCapturer> capturer_;
 };
 
-}  // namespace
+}  // namespace_id
+
+
+
+void StatsCallback::OnStatsDelivered(
+    const rtc::scoped_refptr<const webrtc::RTCStatsReport>& report) {
+  conductor_->OnStatsDelivered(report);
+}
+
 
 Conductor::Conductor(PeerConnectionClient* client, MainWindow* main_wnd)
-    : peer_id_(-1), loopback_(false), client_(client), main_wnd_(main_wnd) {
-  client_->RegisterObserver(this);  // register as observer of PeerConnectionClient
-  main_wnd->RegisterObserver(this); // register as observer of MainWindow
+    : my_id_(-1),
+      peer_id_(-1),
+      loopback_(false),
+      client_(client),
+      main_wnd_(main_wnd),
+      logging_active_(false) {
+  client_->RegisterObserver(this);
+  main_wnd->RegisterObserver(this);
 }
 
 Conductor::~Conductor() {
   RTC_DCHECK(!peer_connection_);
+  StopLogging();
 }
 
 bool Conductor::connection_active() const {
@@ -177,6 +196,8 @@ bool Conductor::InitializePeerConnection() {
   // 3. add audio and video tracks
   AddTracks();
 
+  StartLogging();
+
   return peer_connection_ != nullptr;
 }
 
@@ -225,6 +246,7 @@ bool Conductor::CreatePeerConnection() {
 }
 
 void Conductor::DeletePeerConnection() {
+  StopLogging();
   main_wnd_->StopLocalRenderer();
   main_wnd_->StopRemoteRenderer();
   peer_connection_ = nullptr;
@@ -299,6 +321,8 @@ void Conductor::OnIceCandidate(const webrtc::IceCandidateInterface* candidate) {
 
 void Conductor::OnSignedIn() {
   RTC_LOG(LS_INFO) << __FUNCTION__;
+  my_id_ = client_->id(); 
+  RTC_LOG(LS_INFO) << "Signed in with my_id_: " << my_id_;
   main_wnd_->SwitchToPeerList(client_->peers());
 }
 
@@ -545,7 +569,7 @@ void Conductor::AddTracks() {
     rtc::scoped_refptr<webrtc::VideoTrackInterface> video_track_(
         peer_connection_factory_->CreateVideoTrack(video_device, kVideoLabel));
     // send video track to local renderer
-    main_wnd_->StartLocalRenderer(video_track_.get(), peer_id_);
+    main_wnd_->StartLocalRenderer(video_track_.get(), my_id_);
 
     // add video track to PeerConnection
     result_or_error = peer_connection_->AddTrack(video_track_, {kStreamId});
@@ -630,7 +654,7 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
         // obtain remote video track
         auto* video_track = static_cast<webrtc::VideoTrackInterface*>(track);
         // send remote video track to main_wnd_ renderer
-        main_wnd_->StartRemoteRenderer(video_track, peer_id_);
+        main_wnd_->StartRemoteRenderer(video_track, my_id_);
       }
       track->Release();
       break;
@@ -698,3 +722,267 @@ void Conductor::SendMessage(const std::string& json_object) {
   // message type is SEND_MESSAGE_TO_PEER
   main_wnd_->QueueUIThreadCallback(SEND_MESSAGE_TO_PEER, msg);
 }
+
+
+// New methods for logging
+void Conductor::StartLogging() {
+  if (!logging_active_.exchange(true)) {
+    start_time_ = static_cast<unsigned long>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    
+    std::string prefix = std::to_string(start_time_);
+    char filename[256];
+    snprintf(filename, sizeof(filename), "%s-pc-%d.csv", prefix.c_str(), my_id_);
+    pc_log_ = std::make_unique<CSVWriter>(filename);
+    snprintf(filename, sizeof(filename), "%s-in-rtp-%d.csv", prefix.c_str(), my_id_);
+    in_rtp_log_ = std::make_unique<CSVWriter>(filename);
+    snprintf(filename, sizeof(filename), "%s-out-rtp-%d.csv", prefix.c_str(), my_id_);
+    out_rtp_log_ = std::make_unique<CSVWriter>(filename);
+
+    // Peer connection stats header
+    *pc_log_ << "timestamp,transport_id,local_candidate_id,remote_candidate_id,state,priority,"
+             << "nominated,writable,packets_sent,packets_received,bytes_sent,bytes_received,"
+             << "total_round_trip_time,current_round_trip_time,available_outgoing_bitrate,"
+             << "available_incoming_bitrate,requests_received,requests_sent,responses_received,"
+             << "responses_sent,consent_requests_sent,packets_discarded_on_send,"
+             << "bytes_discarded_on_send,last_packet_received_timestamp,last_packet_sent_timestamp\n";
+
+    // Inbound RTP stats header
+    *in_rtp_log_ << "timestamp,track_identifier,mid,remote_id,ssrc,kind,packets_lost,packets_received,"
+                 << "packets_discarded,fec_packets_received,fec_bytes_received,bytes_received,"
+                 << "header_bytes_received,retransmitted_packets_received,retransmitted_bytes_received,"
+                 << "rtx_ssrc,jitter,jitter_buffer_delay,jitter_buffer_target_delay,"
+                 << "jitter_buffer_minimum_delay,jitter_buffer_emitted_count,total_samples_received,"
+                 << "concealed_samples,silent_concealed_samples,concealment_events,"
+                 << "inserted_samples_for_deceleration,removed_samples_for_acceleration,audio_level,"
+                 << "total_audio_energy,total_samples_duration,frames_received,frame_width,frame_height,"
+                 << "frames_per_second,frames_decoded,key_frames_decoded,frames_dropped,total_decode_time,"
+                 << "total_processing_delay,total_assembly_time,frames_assembled_from_multiple_packets,"
+                 << "total_inter_frame_delay,total_squared_inter_frame_delay,pause_count,"
+                 << "total_pauses_duration,freeze_count,total_freezes_duration,content_type,"
+                 << "estimated_playout_timestamp,decoder_implementation,fir_count,pli_count,nack_count,"
+                 << "qp_sum,jitter_buffer_flushes,delayed_packet_outage_samples,"
+                 << "relative_packet_arrival_delay,interruption_count,total_interruption_duration,"
+                 << "min_playout_delay\n";
+
+    // Outbound RTP stats header
+    *out_rtp_log_ << "timestamp,media_source_id,remote_id,mid,rid,ssrc,rtx_ssrc,kind,packets_sent,"
+                  << "bytes_sent,retransmitted_packets_sent,header_bytes_sent,retransmitted_bytes_sent,"
+                  << "target_bitrate,frames_encoded,key_frames_encoded,total_encode_time,"
+                  << "total_encoded_bytes_target,frame_width,frame_height,frames_per_second,frames_sent,"
+                  << "huge_frames_sent,total_packet_send_delay,quality_limitation_reason,"
+                  << "quality_limitation_duration_bandwidth,quality_limitation_duration_cpu,"
+                  << "quality_limitation_duration_none,quality_limitation_duration_other,"
+                  << "quality_limitation_resolution_changes,content_type,encoder_implementation,"
+                  << "fir_count,pli_count,nack_count,qp_sum,active,power_efficient_encoder,"
+                  << "scalability_mode\n";
+
+    logging_thread_ = std::make_unique<std::thread>(&Conductor::LoggingThread, this);
+  }
+}
+
+void Conductor::StopLogging() {
+  if (logging_active_.exchange(false)) {
+    if (logging_thread_ && logging_thread_->joinable()) {
+      logging_thread_->join();
+    }
+    pc_log_.reset();
+    in_rtp_log_.reset();
+    out_rtp_log_.reset();
+  }
+}
+
+void Conductor::LoggingThread() {
+  while (logging_active_) {
+    LogMetrics();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+}
+
+// Creates a StatsCallback object and passes it to peer_connection_->GetStats().
+void Conductor::LogMetrics() {
+  if (!peer_connection_) return;
+
+  // RefCountedObject is a template class, StatsCallback is the type 
+  // we're "specializing" the template with. We're creating a new 
+  // object that is a StatsCallback, and has additional reference 
+  // counting functionality.
+  rtc::scoped_refptr<StatsCallback> callback = 
+      rtc::scoped_refptr<StatsCallback>(
+          new rtc::RefCountedObject<StatsCallback>(this));
+  // When we pass our StatsCallback object to GetStats(), WebRTC 
+  // stores it as a RTCStatsCollectorCallback*. When the stats are 
+  // ready, it calls OnStatsDelivered() on this pointer.  
+  // The get() method is defined in the rtc::scoped_refptr class, 
+  // which returns the raw pointer managed by the scoped_refptr.
+  // This design using scoped_refptr and RefCountedObject is common 
+  // in WebRTC for managing object lifetimes and reference counting.    
+  // Asynchronous Method: it starts collecting stats but doesn't 
+  // wait for them to be ready before returning.
+  peer_connection_->GetStats(callback.get());
+}
+
+// Called by StatsCallback::OnStatsDelivered()
+// It uses GetStatsOfType<T>() to get specific types of stats. 
+void Conductor::OnStatsDelivered(
+    const rtc::scoped_refptr<const webrtc::RTCStatsReport>& report) {
+  std::lock_guard<std::mutex> lock(log_mutex_);
+  uint64_t timestamp = rtc::TimeMillis();
+
+  // Log peer connection stats
+  auto candidate_pair_stats = report->GetStatsOfType<webrtc::RTCIceCandidatePairStats>();
+  if (!candidate_pair_stats.empty()) {
+    const auto& stat = candidate_pair_stats[0];  // We're logging the first (usually active) candidate pair
+    *pc_log_ << timestamp << ",";
+    pc_log_->writeFromDict(*stat, "transport_id");
+    pc_log_->writeFromDict(*stat, "local_candidate_id");
+    pc_log_->writeFromDict(*stat, "remote_candidate_id");
+    pc_log_->writeFromDict(*stat, "state");
+    pc_log_->writeFromDict(*stat, "priority");
+    pc_log_->writeFromDict(*stat, "nominated");
+    pc_log_->writeFromDict(*stat, "writable");
+    pc_log_->writeFromDict(*stat, "packets_sent");
+    pc_log_->writeFromDict(*stat, "packets_received");
+    pc_log_->writeFromDict(*stat, "bytes_sent");
+    pc_log_->writeFromDict(*stat, "bytes_received");
+    pc_log_->writeFromDict(*stat, "total_round_trip_time");
+    pc_log_->writeFromDict(*stat, "current_round_trip_time");
+    pc_log_->writeFromDict(*stat, "available_outgoing_bitrate"); // bps
+    pc_log_->writeFromDict(*stat, "available_incoming_bitrate");
+    pc_log_->writeFromDict(*stat, "requests_received");
+    pc_log_->writeFromDict(*stat, "requests_sent");
+    pc_log_->writeFromDict(*stat, "responses_received");
+    pc_log_->writeFromDict(*stat, "responses_sent");
+    pc_log_->writeFromDict(*stat, "consent_requests_sent");
+    pc_log_->writeFromDict(*stat, "packets_discarded_on_send");
+    pc_log_->writeFromDict(*stat, "bytes_discarded_on_send");
+    pc_log_->writeFromDict(*stat, "last_packet_received_timestamp");
+    pc_log_->writeFromDict(*stat, "last_packet_sent_timestamp");
+    *pc_log_ << "\n";
+  }
+
+  // Log inbound RTP stats
+  auto inbound_rtp_stats = report->GetStatsOfType<webrtc::RTCInboundRtpStreamStats>();
+  for (const auto& stat : inbound_rtp_stats) {
+    *in_rtp_log_ << timestamp << ",";
+    in_rtp_log_->writeFromDict(*stat, "track_identifier");
+    in_rtp_log_->writeFromDict(*stat, "mid");
+    in_rtp_log_->writeFromDict(*stat, "remote_id");
+    in_rtp_log_->writeFromDict(*stat, "ssrc");  // This might be from the base class
+    in_rtp_log_->writeFromDict(*stat, "kind");  // This might be from the base class
+    in_rtp_log_->writeFromDict(*stat, "packets_lost");  // This might be from the base class
+    in_rtp_log_->writeFromDict(*stat, "packets_received");
+    in_rtp_log_->writeFromDict(*stat, "packets_discarded");
+    in_rtp_log_->writeFromDict(*stat, "fec_packets_received");
+    in_rtp_log_->writeFromDict(*stat, "fec_bytes_received");
+    in_rtp_log_->writeFromDict(*stat, "bytes_received");
+    in_rtp_log_->writeFromDict(*stat, "header_bytes_received");
+    in_rtp_log_->writeFromDict(*stat, "retransmitted_packets_received");
+    in_rtp_log_->writeFromDict(*stat, "retransmitted_bytes_received");
+    in_rtp_log_->writeFromDict(*stat, "rtx_ssrc");
+    in_rtp_log_->writeFromDict(*stat, "jitter");  // This might be from the base class
+    in_rtp_log_->writeFromDict(*stat, "jitter_buffer_delay");
+    in_rtp_log_->writeFromDict(*stat, "jitter_buffer_target_delay");
+    in_rtp_log_->writeFromDict(*stat, "jitter_buffer_minimum_delay");
+    in_rtp_log_->writeFromDict(*stat, "jitter_buffer_emitted_count");
+    in_rtp_log_->writeFromDict(*stat, "total_samples_received");
+    in_rtp_log_->writeFromDict(*stat, "concealed_samples");
+    in_rtp_log_->writeFromDict(*stat, "silent_concealed_samples");
+    in_rtp_log_->writeFromDict(*stat, "concealment_events");
+    in_rtp_log_->writeFromDict(*stat, "inserted_samples_for_deceleration");
+    in_rtp_log_->writeFromDict(*stat, "removed_samples_for_acceleration");
+    in_rtp_log_->writeFromDict(*stat, "audio_level");
+    in_rtp_log_->writeFromDict(*stat, "total_audio_energy");
+    in_rtp_log_->writeFromDict(*stat, "total_samples_duration");
+    in_rtp_log_->writeFromDict(*stat, "frames_received");
+    in_rtp_log_->writeFromDict(*stat, "frame_width");
+    in_rtp_log_->writeFromDict(*stat, "frame_height");
+    in_rtp_log_->writeFromDict(*stat, "frames_per_second");
+    in_rtp_log_->writeFromDict(*stat, "frames_decoded");
+    in_rtp_log_->writeFromDict(*stat, "key_frames_decoded");
+    in_rtp_log_->writeFromDict(*stat, "frames_dropped");
+    in_rtp_log_->writeFromDict(*stat, "total_decode_time");
+    in_rtp_log_->writeFromDict(*stat, "total_processing_delay");
+    in_rtp_log_->writeFromDict(*stat, "total_assembly_time");
+    in_rtp_log_->writeFromDict(*stat, "frames_assembled_from_multiple_packets");
+    in_rtp_log_->writeFromDict(*stat, "total_inter_frame_delay");
+    in_rtp_log_->writeFromDict(*stat, "total_squared_inter_frame_delay");
+    in_rtp_log_->writeFromDict(*stat, "pause_count");
+    in_rtp_log_->writeFromDict(*stat, "total_pauses_duration");
+    in_rtp_log_->writeFromDict(*stat, "freeze_count");
+    in_rtp_log_->writeFromDict(*stat, "total_freezes_duration");
+    in_rtp_log_->writeFromDict(*stat, "content_type");
+    in_rtp_log_->writeFromDict(*stat, "estimated_playout_timestamp");
+    in_rtp_log_->writeFromDict(*stat, "decoder_implementation");
+    in_rtp_log_->writeFromDict(*stat, "fir_count");
+    in_rtp_log_->writeFromDict(*stat, "pli_count");
+    in_rtp_log_->writeFromDict(*stat, "nack_count");
+    in_rtp_log_->writeFromDict(*stat, "qp_sum");
+    in_rtp_log_->writeFromDict(*stat, "jitter_buffer_flushes");
+    in_rtp_log_->writeFromDict(*stat, "delayed_packet_outage_samples");
+    in_rtp_log_->writeFromDict(*stat, "relative_packet_arrival_delay");
+    in_rtp_log_->writeFromDict(*stat, "interruption_count");
+    in_rtp_log_->writeFromDict(*stat, "total_interruption_duration");
+    in_rtp_log_->writeFromDict(*stat, "min_playout_delay");
+    *in_rtp_log_ << "\n";
+  }
+
+  // Log outbound RTP stats
+  auto outbound_rtp_stats = report->GetStatsOfType<webrtc::RTCOutboundRtpStreamStats>();
+  for (const auto& stat : outbound_rtp_stats) {
+    *out_rtp_log_ << timestamp << ",";
+    out_rtp_log_->writeFromDict(*stat, "media_source_id");
+    out_rtp_log_->writeFromDict(*stat, "remote_id");
+    out_rtp_log_->writeFromDict(*stat, "mid");
+    out_rtp_log_->writeFromDict(*stat, "rid");
+    out_rtp_log_->writeFromDict(*stat, "ssrc");  // This might be from the base class
+    out_rtp_log_->writeFromDict(*stat, "rtx_ssrc");
+    out_rtp_log_->writeFromDict(*stat, "kind");  // This might be from the base class
+    out_rtp_log_->writeFromDict(*stat, "packets_sent");  // This might be from the base class
+    out_rtp_log_->writeFromDict(*stat, "bytes_sent");  // This might be from the base class
+    out_rtp_log_->writeFromDict(*stat, "retransmitted_packets_sent");
+    out_rtp_log_->writeFromDict(*stat, "header_bytes_sent");
+    out_rtp_log_->writeFromDict(*stat, "retransmitted_bytes_sent");
+    out_rtp_log_->writeFromDict(*stat, "target_bitrate");
+    out_rtp_log_->writeFromDict(*stat, "frames_encoded");
+    out_rtp_log_->writeFromDict(*stat, "key_frames_encoded");
+    out_rtp_log_->writeFromDict(*stat, "total_encode_time");
+    out_rtp_log_->writeFromDict(*stat, "total_encoded_bytes_target");
+    out_rtp_log_->writeFromDict(*stat, "frame_width");
+    out_rtp_log_->writeFromDict(*stat, "frame_height");
+    out_rtp_log_->writeFromDict(*stat, "frames_per_second");
+    out_rtp_log_->writeFromDict(*stat, "frames_sent");
+    out_rtp_log_->writeFromDict(*stat, "huge_frames_sent");
+    out_rtp_log_->writeFromDict(*stat, "total_packet_send_delay");
+    out_rtp_log_->writeFromDict(*stat, "quality_limitation_reason");
+    
+    // Handle quality_limitation_durations
+    if (stat->quality_limitation_durations.has_value()) {
+      const auto& durations = *stat->quality_limitation_durations;
+      *out_rtp_log_ << durations.find("bandwidth")->second << ","
+                    << durations.find("cpu")->second << ","
+                    << durations.find("none")->second << ","
+                    << durations.find("other")->second << ",";
+    } else {
+      *out_rtp_log_ << ",,,," ;  // Empty values if not present
+    }
+    
+    out_rtp_log_->writeFromDict(*stat, "quality_limitation_resolution_changes");
+    out_rtp_log_->writeFromDict(*stat, "content_type");
+    out_rtp_log_->writeFromDict(*stat, "encoder_implementation");
+    out_rtp_log_->writeFromDict(*stat, "fir_count");
+    out_rtp_log_->writeFromDict(*stat, "pli_count");
+    out_rtp_log_->writeFromDict(*stat, "nack_count");
+    out_rtp_log_->writeFromDict(*stat, "qp_sum");
+    out_rtp_log_->writeFromDict(*stat, "active");
+    out_rtp_log_->writeFromDict(*stat, "power_efficient_encoder");
+    out_rtp_log_->writeFromDict(*stat, "scalability_mode");
+    *out_rtp_log_ << "\n";
+  }
+
+  pc_log_->flush();
+  in_rtp_log_->flush();
+  out_rtp_log_->flush();
+}
+

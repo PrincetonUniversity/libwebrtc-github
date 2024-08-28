@@ -763,6 +763,8 @@ if (is_linux || is_chromeos || is_win) {
     sources = [
       "peerconnection/client/conductor.cc",
       "peerconnection/client/conductor.h",
+      "peerconnection/client/csv_writer.cc",
+      "peerconnection/client/csv_writer.h",
       "peerconnection/client/defaults.cc",
       "peerconnection/client/defaults.h",
       "peerconnection/client/peer_connection_client.cc",
