@@ -49,4 +49,9 @@ ABSL_FLAG(
     "will assign the group Enabled to field trial WebRTC-FooFeature. Multiple "
     "trials are separated by \"/\"");
 
+ABSL_FLAG(bool, disable_gui, false, "Disable GUI and run in automatic mode");   
+
+ABSL_FLAG(bool, is_caller, false, "Specify if this instance should act as the caller in GUI-less mode");
+
+
 #endif  // EXAMPLES_PEERCONNECTION_CLIENT_FLAG_DEFS_H_

@@ -75,6 +75,7 @@ void PeerConnectionClient::RegisterObserver(
 void PeerConnectionClient::Connect(const std::string& server,
                                    int port,
                                    const std::string& client_name) {
+  printf("Enter Connect\n");
   RTC_DCHECK(!server.empty());
   RTC_DCHECK(!client_name.empty());
 
@@ -106,15 +107,22 @@ void PeerConnectionClient::Connect(const std::string& server,
     state_ = RESOLVING;
     resolver_ = std::make_unique<webrtc::AsyncDnsResolver>(); // create a new AsyncDnsResolver
     resolver_->Start(server_address_,
-                     [this] { OnResolveResult(resolver_->result()); });
+                     [this] { 
+                      printf("DNS resolution callback triggered\n");
+                      OnResolveResult(resolver_->result()); 
+                     });
+    printf("AsyncDnsResolver::Start called\n");
   } else {
+    printf("Server address is resolved. Calling DoConnect\n");
     DoConnect();
   }
+  printf("Exit Connect\n");
 }
 
 // After the domain name resolver AsyncDnsResolver finishes, it will callback to this function.
 void PeerConnectionClient::OnResolveResult(
     const webrtc::AsyncDnsResolverResult& result) {
+  printf("Enter OnResolveResult\n");
   if (result.GetError() != 0) {
     callback_->OnServerConnectionFailure();
     resolver_.reset();
@@ -128,6 +136,7 @@ void PeerConnectionClient::OnResolveResult(
     return;
   }
   DoConnect();
+  printf("Exit OnResolveResult\n");
 }
 
 void PeerConnectionClient::DoConnect() {
@@ -137,6 +146,7 @@ void PeerConnectionClient::DoConnect() {
   // it sends a wait signal to the signaling server and waits for a response. 
   // When the signaling server has messages to send to the client, it will return them 
   // through this socket.
+  printf("Enter DoConnect\n");
   control_socket_.reset(CreateClientSocket(server_address_.ipaddr().family()));
   hanging_get_.reset(CreateClientSocket(server_address_.ipaddr().family()));
   InitSocketSignals();

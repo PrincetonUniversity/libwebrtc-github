@@ -11,6 +11,7 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <stdio.h>
+#include <signal.h>
 
 #include "absl/flags/parse.h"
 #include "api/scoped_refptr.h"
@@ -26,8 +27,8 @@
 
 class CustomSocketServer : public rtc::PhysicalSocketServer {
  public:
-  explicit CustomSocketServer(GtkMainWnd* wnd)
-      : wnd_(wnd), conductor_(NULL), client_(NULL) {}
+  explicit CustomSocketServer(GtkMainWnd* wnd, bool disable_gui)
+      : wnd_(wnd), conductor_(NULL), client_(NULL), disable_gui_(disable_gui), quit_(false) {}
   virtual ~CustomSocketServer() {}
 
   void SetMessageQueue(rtc::Thread* queue) override { message_queue_ = queue; }
@@ -38,28 +39,54 @@ class CustomSocketServer : public rtc::PhysicalSocketServer {
   // Override so that we can also pump the GTK message loop.
   // This function never waits.
   bool Wait(webrtc::TimeDelta max_wait_duration, bool process_io) override {
-    // Pump GTK events.
-    // TODO(henrike): We really should move either the socket server or UI to a
-    // different thread.  Alternatively we could look at merging the two loops
-    // by implementing a dispatcher for the socket server and/or use
-    // g_main_context_set_poll_func.
-    while (gtk_events_pending())
-      gtk_main_iteration();
-
-    if (!wnd_->IsWindow() && !conductor_->connection_active() &&
-        client_ != NULL && !client_->is_connected()) {
-      message_queue_->Quit();
+    if (!disable_gui_) {
+      // Pump GTK events, keeps the thread alive.
+      while (gtk_events_pending())
+        gtk_main_iteration();
+      if (!wnd_->IsWindow() && !conductor_->connection_active() &&
+          client_ != NULL && !client_->is_connected()) {
+        message_queue_->Quit();
+      }
+    } else {
+      // Non-GUI mode handling
+      if (message_queue_) {
+        // event queue is stored in message_queue_
+        // checks and processes any messages in the queue        
+        // message_queue_->ProcessMessages(10);  // Process for 10ms
+      } else {
+        RTC_LOG(LS_WARNING) << "message_queue_ is null in non-GUI mode";
+      }      
+      if (quit_) {
+        message_queue_->Quit();
+      }
     }
-    return rtc::PhysicalSocketServer::Wait(webrtc::TimeDelta::Zero(),
-                                           process_io);
+
+    return rtc::PhysicalSocketServer::Wait(
+        disable_gui_ ? max_wait_duration : webrtc::TimeDelta::Zero(), 
+        process_io);
   }
+
+  void Quit() { quit_ = true; }
+
+  bool IsQuitting() const { return quit_; }
 
  protected:
   rtc::Thread* message_queue_;
   GtkMainWnd* wnd_;
   Conductor* conductor_;
   PeerConnectionClient* client_;
+  bool disable_gui_;
+  bool quit_;  
 };
+
+CustomSocketServer* g_socket_server = nullptr;
+
+void SignalHandler(int signum) {
+  if (g_socket_server) {
+    printf("Received signal %d, initiating shutdown...\n", signum);
+    g_socket_server->Quit();
+  }
+}
 
 int main(int argc, char* argv[]) {
   gtk_init(&argc, &argv);
@@ -81,6 +108,12 @@ int main(int argc, char* argv[]) {
   const std::string forced_field_trials =
       absl::GetFlag(FLAGS_force_fieldtrials);
   webrtc::field_trial::InitFieldTrialsFromString(forced_field_trials.c_str());
+  
+  bool disable_gui = absl::GetFlag(FLAGS_disable_gui);
+  bool is_caller = absl::GetFlag(FLAGS_is_caller);
+  printf("disable_gui flag: %s\n", disable_gui ? "true" : "false");
+  printf("Server: %s\n", absl::GetFlag(FLAGS_server).c_str());
+  printf("Port: %d\n", absl::GetFlag(FLAGS_port));  
 
   // Abort if the user specifies a port that is outside the allowed
   // range [1, 65535].
@@ -92,31 +125,48 @@ int main(int argc, char* argv[]) {
   const std::string server = absl::GetFlag(FLAGS_server);
   GtkMainWnd wnd(server.c_str(), absl::GetFlag(FLAGS_port),
                  absl::GetFlag(FLAGS_autoconnect),
-                 absl::GetFlag(FLAGS_autocall));
+                 absl::GetFlag(FLAGS_autocall),
+                 disable_gui);
   wnd.Create();
 
-  CustomSocketServer socket_server(&wnd);
+  CustomSocketServer socket_server(&wnd, disable_gui);
+  g_socket_server = &socket_server;
   rtc::AutoSocketServerThread thread(&socket_server);
+
+  // Set up signal handler for graceful termination
+  signal(SIGINT, SignalHandler);
 
   rtc::InitializeSSL();
   // Must be constructed after we set the socketserver.
   PeerConnectionClient client;
   // create conductor
-  auto conductor = rtc::make_ref_counted<Conductor>(&client, &wnd);
+  auto conductor = rtc::make_ref_counted<Conductor>(&client, &wnd, disable_gui, is_caller);
   socket_server.set_client(&client);
   socket_server.set_conductor(conductor.get());
 
-  thread.Run();
+  printf("conductor created\n"); 
 
-  // gtk_main();
-  wnd.Destroy();
+  // Automatically start login process in GUI-less mode
+  if (disable_gui) {
+    conductor->AutoLogin(server, absl::GetFlag(FLAGS_port));
 
-  // TODO(henrike): Run the Gtk main loop to tear down the connection.
-  /*
-  while (gtk_events_pending()) {
-    gtk_main_iteration();
+    // Run the thread until it's time to quit
+    while (!socket_server.IsQuitting()) {
+      conductor->ProcessMessagesForNonGUIMode();
+
+      // Existing message processing
+      thread.ProcessMessages(10);
+    }
+  } else {
+    // This method starts the thread's message loop and blocks until the thread is quit.
+    // event driven
+    thread.Run();
   }
-  */
+
+  printf("Exiting main loop\n");
+
+  wnd.Destroy();
   rtc::CleanupSSL();
+  g_socket_server = nullptr;
   return 0;
 }

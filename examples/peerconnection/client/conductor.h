@@ -40,6 +40,14 @@ class VideoRenderer;
 
 class StatsCallback;  // Forward declaration
 
+struct UIThreadCallbackData {
+    int msg_id;
+    void* data;
+
+    UIThreadCallbackData(int id, void* d) : msg_id(id), data(d) {}
+};
+
+
 class Conductor : public webrtc::PeerConnectionObserver,
                   public webrtc::CreateSessionDescriptionObserver,
                   public PeerConnectionClientObserver,
@@ -53,11 +61,18 @@ class Conductor : public webrtc::PeerConnectionObserver,
     TRACK_REMOVED,
   };
 
-  Conductor(PeerConnectionClient* client, MainWindow* main_wnd);
+  Conductor(PeerConnectionClient* client, MainWindow* main_wnd, bool disable_gui, bool is_caller);
 
   bool connection_active() const;
 
+  void AutoLogin(const std::string& server, int port);
+
   void Close() override;
+
+  void ProcessMessagesForNonGUIMode();
+
+  void QueuePendingMessage(int msg_id, void* data) override;
+
 
  protected:
   ~Conductor();
@@ -150,6 +165,7 @@ class Conductor : public webrtc::PeerConnectionObserver,
   PeerConnectionClient* client_;
   MainWindow* main_wnd_;
   std::deque<std::string*> pending_messages_;
+  std::deque<UIThreadCallbackData*> pending_messages_NonGUI;
   std::string server_;
 
   // New member variables for logging
@@ -160,6 +176,9 @@ class Conductor : public webrtc::PeerConnectionObserver,
   std::unique_ptr<CSVWriter> pc_log_;
   std::unique_ptr<CSVWriter> in_rtp_log_;
   std::unique_ptr<CSVWriter> out_rtp_log_;
+
+  bool disable_gui_;
+  bool is_caller_;
 
   friend class StatsCallback;
 };

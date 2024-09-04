@@ -38,7 +38,7 @@ typedef struct _cairo cairo_t;
 // implementation.
 class GtkMainWnd : public MainWindow {
  public:
-  GtkMainWnd(const char* server, int port, bool autoconnect, bool autocall);
+  GtkMainWnd(const char* server, int port, bool autoconnect, bool autocall, bool disable_gui);
   ~GtkMainWnd();
 
   virtual void RegisterObserver(MainWndCallback* callback);
@@ -135,6 +135,7 @@ class GtkMainWnd : public MainWindow {
   int height_;
   std::unique_ptr<uint8_t[]> draw_buffer_;
   int draw_buffer_size_;
+  bool disable_gui_;
 };
 
 #endif  // EXAMPLES_PEERCONNECTION_CLIENT_LINUX_MAIN_WND_H_

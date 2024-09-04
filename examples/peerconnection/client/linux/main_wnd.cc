@@ -156,7 +156,8 @@ gboolean Draw(GtkWidget* widget, cairo_t* cr, gpointer data) {
 GtkMainWnd::GtkMainWnd(const char* server,
                        int port,
                        bool autoconnect,
-                       bool autocall)
+                       bool autocall,
+                       bool disable_gui)
     : window_(NULL),
       draw_area_(NULL),
       vbox_(NULL),
@@ -166,7 +167,8 @@ GtkMainWnd::GtkMainWnd(const char* server,
       callback_(NULL),
       server_(server),
       autoconnect_(autoconnect),
-      autocall_(autocall) {
+      autocall_(autocall),
+      disable_gui_(disable_gui) {
   char buffer[10];
   snprintf(buffer, sizeof(buffer), "%i", port);
   port_ = buffer;
@@ -227,12 +229,21 @@ void GtkMainWnd::StopRemoteRenderer() {
 }
 
 // HandleUIThreadCallback points to Conductor::UIThreadCallback
+// adding a task to this message queue
 void GtkMainWnd::QueueUIThreadCallback(int msg_id, void* data) {
-  g_idle_add(HandleUIThreadCallback,
-             new UIThreadCallbackData(callback_, msg_id, data));
+  if (disable_gui_) {
+    // In non-GUI mode, directly push the callback to the conductor's pending messages queue.
+    callback_->QueuePendingMessage(msg_id, data);
+  } else {
+    // In GUI mode, use GTK's g_idle_add to handle the callback.
+    g_idle_add(HandleUIThreadCallback, new UIThreadCallbackData(callback_, msg_id, data));
+  }
 }
 
 bool GtkMainWnd::Create() {
+  if (disable_gui_) {
+    return true;  // Skip GUI creation in automatic mode
+  }  
   RTC_DCHECK(window_ == NULL);
 
   window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -264,6 +275,12 @@ bool GtkMainWnd::Destroy() {
 
 void GtkMainWnd::SwitchToConnectUI() {
   RTC_LOG(LS_INFO) << __FUNCTION__;
+
+  if (disable_gui_) {
+    // Automatically connect in GUI-less mode
+    callback_->StartLogin(server_, atoi(port_.c_str()));
+    return;
+  }  
 
   RTC_DCHECK(IsWindow());
   RTC_DCHECK(vbox_ == NULL);
@@ -311,7 +328,14 @@ void GtkMainWnd::SwitchToConnectUI() {
 }
 
 void GtkMainWnd::SwitchToPeerList(const Peers& peers) {
-  RTC_LOG(LS_INFO) << __FUNCTION__;
+  RTC_LOG(LS_INFO) << __FUNCTION__;  
+  if (disable_gui_) {
+    if (!peers.empty()) {
+      // Automatically connect to the first peer in GUI-less mode
+      callback_->ConnectToPeer(peers.begin()->first);
+    }
+    return;
+  }  
 
   if (!peer_list_) {
     gtk_container_set_border_width(GTK_CONTAINER(window_), 0);
@@ -350,6 +374,11 @@ void GtkMainWnd::SwitchToPeerList(const Peers& peers) {
 
 void GtkMainWnd::SwitchToStreamingUI() {
   RTC_LOG(LS_INFO) << __FUNCTION__;
+
+  if (disable_gui_) {
+    RTC_LOG(LS_INFO) << "GUI disabled, skipping UI switch";
+    return;
+  }
 
   RTC_DCHECK(draw_area_ == NULL);
 

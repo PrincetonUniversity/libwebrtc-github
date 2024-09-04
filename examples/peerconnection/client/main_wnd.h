@@ -31,6 +31,7 @@ class MainWndCallback {
   virtual void DisconnectFromServer() = 0;
   virtual void ConnectToPeer(int peer_id) = 0;
   virtual void DisconnectFromCurrentPeer() = 0;
+  virtual void QueuePendingMessage(int msg_id, void* data) = 0;
   virtual void UIThreadCallback(int msg_id, void* data) = 0;
   virtual void Close() = 0;
 
