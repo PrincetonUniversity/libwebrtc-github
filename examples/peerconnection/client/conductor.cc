@@ -366,7 +366,8 @@ void Conductor::OnPeerConnected(int id, const std::string& name) {
     if (main_wnd_->current_ui() == MainWindow::LIST_PEERS)
       main_wnd_->SwitchToPeerList(client_->peers());
   }
-
+  RTC_LOG(LS_INFO) << "Auto-connect check: disable_gui_=" << disable_gui_ 
+                   << ", is_caller_=" << is_caller_ << ", peer_id_=" << peer_id_;
   if (disable_gui_ && is_caller_ && peer_id_ == -1) {
     // Automatically connect to the first peer in GUI-less mode
     ConnectToPeer(id);
@@ -702,7 +703,7 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
 
     // send message to server
     case SEND_MESSAGE_TO_PEER: {
-      RTC_LOG(LS_INFO) << __FUNCTION__ << "SEND_MESSAGE_TO_PEER";
+      RTC_LOG(LS_INFO) << __FUNCTION__ << " SEND_MESSAGE_TO_PEER";
       // obtain message
       std::string* msg = reinterpret_cast<std::string*>(data);
       if (msg) {

@@ -111,9 +111,7 @@ int main(int argc, char* argv[]) {
   
   bool disable_gui = absl::GetFlag(FLAGS_disable_gui);
   bool is_caller = absl::GetFlag(FLAGS_is_caller);
-  printf("disable_gui flag: %s\n", disable_gui ? "true" : "false");
-  printf("Server: %s\n", absl::GetFlag(FLAGS_server).c_str());
-  printf("Port: %d\n", absl::GetFlag(FLAGS_port));  
+  RTC_LOG(LS_INFO) << "disable_gui flag: " << (disable_gui ? "true" : "false");
 
   // Abort if the user specifies a port that is outside the allowed
   // range [1, 65535].
@@ -143,8 +141,6 @@ int main(int argc, char* argv[]) {
   auto conductor = rtc::make_ref_counted<Conductor>(&client, &wnd, disable_gui, is_caller);
   socket_server.set_client(&client);
   socket_server.set_conductor(conductor.get());
-
-  printf("conductor created\n"); 
 
   // Automatically start login process in GUI-less mode
   if (disable_gui) {

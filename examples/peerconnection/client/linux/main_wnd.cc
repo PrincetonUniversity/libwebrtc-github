@@ -330,10 +330,7 @@ void GtkMainWnd::SwitchToConnectUI() {
 void GtkMainWnd::SwitchToPeerList(const Peers& peers) {
   RTC_LOG(LS_INFO) << __FUNCTION__;  
   if (disable_gui_) {
-    if (!peers.empty()) {
-      // Automatically connect to the first peer in GUI-less mode
-      callback_->ConnectToPeer(peers.begin()->first);
-    }
+    RTC_LOG(LS_INFO) << "GUI disabled, skipping UI switch";
     return;
   }  
 
