@@ -931,34 +931,50 @@ void Conductor::OnStatsDelivered(
   // Log peer connection stats
   auto candidate_pair_stats = report->GetStatsOfType<webrtc::RTCIceCandidatePairStats>();
   if (!candidate_pair_stats.empty()) {
-    const auto& stat = candidate_pair_stats[0];  // We're logging the first (usually active) candidate pair
-    *pc_log_ << timestamp << ",";
-    pc_log_->writeFromDict(*stat, "transport_id");
-    pc_log_->writeFromDict(*stat, "local_candidate_id");
-    pc_log_->writeFromDict(*stat, "remote_candidate_id");
-    pc_log_->writeFromDict(*stat, "state");
-    pc_log_->writeFromDict(*stat, "priority");
-    pc_log_->writeFromDict(*stat, "nominated");
-    pc_log_->writeFromDict(*stat, "writable");
-    pc_log_->writeFromDict(*stat, "packets_sent");
-    pc_log_->writeFromDict(*stat, "packets_received");
-    pc_log_->writeFromDict(*stat, "bytes_sent");
-    pc_log_->writeFromDict(*stat, "bytes_received");
-    pc_log_->writeFromDict(*stat, "total_round_trip_time");
-    pc_log_->writeFromDict(*stat, "current_round_trip_time");
-    pc_log_->writeFromDict(*stat, "available_outgoing_bitrate"); // bps
-    pc_log_->writeFromDict(*stat, "available_incoming_bitrate");
-    pc_log_->writeFromDict(*stat, "requests_received");
-    pc_log_->writeFromDict(*stat, "requests_sent");
-    pc_log_->writeFromDict(*stat, "responses_received");
-    pc_log_->writeFromDict(*stat, "responses_sent");
-    pc_log_->writeFromDict(*stat, "consent_requests_sent");
-    pc_log_->writeFromDict(*stat, "packets_discarded_on_send");
-    pc_log_->writeFromDict(*stat, "bytes_discarded_on_send");
-    pc_log_->writeFromDict(*stat, "last_packet_received_timestamp");
-    pc_log_->writeFromDict(*stat, "last_packet_sent_timestamp");
-    *pc_log_ << "\n";
+    // Find the candidate pair with availableOutgoingBitrate
+    const webrtc::RTCIceCandidatePairStats* chosen_stat = nullptr;
+    for (const auto& stat : candidate_pair_stats) {
+      if (stat->available_outgoing_bitrate.has_value()) {
+        chosen_stat = stat;
+        break;
+      }
+    }
+
+    // If we found a candidate pair with availableOutgoingBitrate, log it
+    if (chosen_stat) {
+      *pc_log_ << timestamp << ",";
+      pc_log_->writeFromDict(*chosen_stat, "transport_id");
+      pc_log_->writeFromDict(*chosen_stat, "local_candidate_id");
+      pc_log_->writeFromDict(*chosen_stat, "remote_candidate_id");
+      pc_log_->writeFromDict(*chosen_stat, "state");
+      pc_log_->writeFromDict(*chosen_stat, "priority");
+      pc_log_->writeFromDict(*chosen_stat, "nominated");
+      pc_log_->writeFromDict(*chosen_stat, "writable");
+      pc_log_->writeFromDict(*chosen_stat, "packets_sent");
+      pc_log_->writeFromDict(*chosen_stat, "packets_received");
+      pc_log_->writeFromDict(*chosen_stat, "bytes_sent");
+      pc_log_->writeFromDict(*chosen_stat, "bytes_received");
+      pc_log_->writeFromDict(*chosen_stat, "total_round_trip_time");
+      pc_log_->writeFromDict(*chosen_stat, "current_round_trip_time");
+      pc_log_->writeFromDict(*chosen_stat, "available_outgoing_bitrate"); // bps
+      pc_log_->writeFromDict(*chosen_stat, "available_incoming_bitrate");
+      pc_log_->writeFromDict(*chosen_stat, "requests_received");
+      pc_log_->writeFromDict(*chosen_stat, "requests_sent");
+      pc_log_->writeFromDict(*chosen_stat, "responses_received");
+      pc_log_->writeFromDict(*chosen_stat, "responses_sent");
+      pc_log_->writeFromDict(*chosen_stat, "consent_requests_sent");
+      pc_log_->writeFromDict(*chosen_stat, "packets_discarded_on_send");
+      pc_log_->writeFromDict(*chosen_stat, "bytes_discarded_on_send");
+      pc_log_->writeFromDict(*chosen_stat, "last_packet_received_timestamp");
+      pc_log_->writeFromDict(*chosen_stat, "last_packet_sent_timestamp");
+      *pc_log_ << "\n";
+    } else {
+      // Log a message if no candidate pair with availableOutgoingBitrate was found
+      RTC_LOG(LS_WARNING) << "No candidate pair with availableOutgoingBitrate found";
+    }
   }
+
+  // RTC_LOG(LS_INFO) << "Available outgoing bandwidth: " << candidate_pair_stats[0]->available_outgoing_bitrate.value() << " bps";  
 
   // Log inbound RTP stats
   auto inbound_rtp_stats = report->GetStatsOfType<webrtc::RTCInboundRtpStreamStats>();

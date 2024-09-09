@@ -394,6 +394,7 @@ void PacingController::ProcessPackets() {
   const Timestamp now = CurrentTime();
   Timestamp target_send_time = now;
 
+  // when video/audio is paused, we still need to send keep-alive packets.
   if (ShouldSendKeepalive(now)) {
     DataSize keepalive_data_sent = DataSize::Zero();
     // We can not send padding unless a normal packet has first been sent. If
