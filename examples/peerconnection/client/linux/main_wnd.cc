@@ -27,6 +27,7 @@
 #include <map>
 #include <utility>
 #include <sys/stat.h>
+#include <cinttypes>
 
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame_buffer.h"
@@ -38,6 +39,10 @@
 #include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/libyuv/include/libyuv/convert_from.h"
 #include "third_party/libyuv/include/libyuv.h"
+#include "api/environment/environment_factory.h"
+#include "api/video_codecs/video_encoder_factory_template.h"
+#include "api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h"
+#include "modules/video_coding/include/video_codec_interface.h"
 
 
 
@@ -533,24 +538,53 @@ GtkMainWnd::VideoRenderer::VideoRenderer(
       main_wnd_(main_wnd),
       rendered_track_(track_to_render),
       peer_id_(peer_id), 
-      yuv_file_(nullptr),
+      video_file_(nullptr),
       metadata_file_(nullptr),
       frame_count_(0),
       save_enabled_(save_enabled),
-      frame_timestamp_(0) {
+      first_frame_timestamp_us_(0),
+      first_rtp_timestamp_(0),
+      target_width_(1280),
+      target_height_(720) {
   rendered_track_->AddOrUpdateSink(this, rtc::VideoSinkWants());
   if (save_enabled_) {
-    if (!InitializeYUVFile()) {
-      RTC_LOG(LS_ERROR) << "Failed to initialize YUV file";
+    if (!InitializeVideoFile()) {
+      RTC_LOG(LS_ERROR) << "Failed to initialize video file";
       save_enabled_ = false;
     }
   }
+
+  time_base_ = 1.0 / 90000.0; 
+
+  // Initialize encoder
+  webrtc::VideoEncoderFactoryTemplate<webrtc::LibvpxVp8EncoderTemplateAdapter> factory;
+  
+  // Create a default Environment
+  webrtc::EnvironmentFactory env_factory;
+  webrtc::Environment env = env_factory.Create();
+
+  encoder_ = factory.Create(env, webrtc::SdpVideoFormat("VP8"));
+  
+  // Configure codec settings
+  codec_settings_.codecType = webrtc::kVideoCodecVP8;
+  codec_settings_.width = target_width_;
+  codec_settings_.height = target_height_;
+  codec_settings_.startBitrate = 2000;  // kbps
+  codec_settings_.maxBitrate = 4000;
+  codec_settings_.maxFramerate = 30;
+  codec_settings_.VP8()->denoisingOn = true;
+  codec_settings_.VP8()->automaticResizeOn = false;  // We handle resizing ourselves
+  codec_settings_.VP8()->keyFrameInterval = 30;
+
+  encoder_->InitEncode(&codec_settings_, webrtc::VideoEncoder::Settings(
+      webrtc::VideoEncoder::Capabilities(false), 1, 0));
+  encoder_->RegisterEncodeCompleteCallback(this);
 }
 
 GtkMainWnd::VideoRenderer::~VideoRenderer() {
   rendered_track_->RemoveSink(this);
   if (save_enabled_) {
-    CloseYUVFile();
+    CloseVideoFile();
   }
 }
 
@@ -587,7 +621,7 @@ void GtkMainWnd::VideoRenderer::OnFrame(const webrtc::VideoFrame& video_frame) {
                      buffer->height());
 
   if (save_enabled_) {
-    SaveYUVFrame(buffer);
+    EncodeAndSaveFrame(video_frame);
   }
 
   gdk_threads_leave();
@@ -595,30 +629,68 @@ void GtkMainWnd::VideoRenderer::OnFrame(const webrtc::VideoFrame& video_frame) {
   g_idle_add(Redraw, main_wnd_);
 }
 
-bool GtkMainWnd::VideoRenderer::InitializeYUVFile() {
-  std::string filename = GetOutputFilename();
-  yuv_file_ = fopen(filename.c_str(), "wb");
-  if (!yuv_file_) {
-    RTC_LOG(LS_ERROR) << "Could not open YUV file for writing: " << filename;
+bool GtkMainWnd::VideoRenderer::InitializeVideoFile() {
+  std::string video_filename = GetOutputFilename(".ivf");
+  video_file_ = fopen(video_filename.c_str(), "wb");
+  if (!video_file_) {
+    RTC_LOG(LS_ERROR) << "Could not open video file for writing: " << video_filename;
     return false;
   }
 
-  std::string metadata_filename = filename + ".meta";
+  // Write IVF file header
+  WriteIvfFileHeader();
+
+  std::string metadata_filename = GetOutputFilename(".meta");
   metadata_file_ = fopen(metadata_filename.c_str(), "w");
   if (!metadata_file_) {
     RTC_LOG(LS_ERROR) << "Could not open metadata file for writing: " << metadata_filename;
-    fclose(yuv_file_);
+    fclose(video_file_);
+    video_file_ = nullptr;
     return false;
   }
 
-  frame_timestamp_ = rtc::TimeMillis();
+  // Write metadata header
+  fprintf(metadata_file_, "frame_number,timestamp_ms,width,height,encoded_size,is_key_frame\n");
+
   return true;
 }
 
-void GtkMainWnd::VideoRenderer::CloseYUVFile() {
-  if (yuv_file_) {
-    fclose(yuv_file_);
-    yuv_file_ = nullptr;
+
+void GtkMainWnd::VideoRenderer::WriteIvfFileHeader() {
+    char ivf_header[32];
+    memcpy(ivf_header, "DKIF", 4);  // File signature
+    uint16_t version = 0;
+    memcpy(ivf_header + 4, &version, 2);
+    uint16_t header_size = 32;
+    memcpy(ivf_header + 6, &header_size, 2);
+    memcpy(ivf_header + 8, "VP80", 4);  // FourCC
+    uint16_t width = static_cast<uint16_t>(target_width_);
+    uint16_t height = static_cast<uint16_t>(target_height_);
+    memcpy(ivf_header + 12, &width, 2);
+    memcpy(ivf_header + 14, &height, 2);
+    uint32_t time_base_denominator = 90000;  // 90kHz clock rate
+    uint32_t time_base_numerator = 1;  // We need to specify this
+    memcpy(ivf_header + 16, &time_base_denominator, 4);
+    memcpy(ivf_header + 20, &time_base_numerator, 4);
+    uint32_t num_frames = 0;  // Will be updated after writing all frames
+    memcpy(ivf_header + 24, &num_frames, 4);
+    uint32_t reserved = 0;
+    memcpy(ivf_header + 28, &reserved, 4);
+
+    fwrite(ivf_header, 1, 32, video_file_);
+}
+
+void GtkMainWnd::VideoRenderer::WriteIvfFrameHeader(size_t frame_size, uint64_t timestamp) {
+    uint32_t frame_size_32 = static_cast<uint32_t>(frame_size);
+    fwrite(&frame_size_32, 1, 4, video_file_);
+    fwrite(&timestamp, 1, 8, video_file_);
+}
+
+
+void GtkMainWnd::VideoRenderer::CloseVideoFile() {
+  if (video_file_) {
+    fclose(video_file_);
+    video_file_ = nullptr;
   }
   if (metadata_file_) {
     fclose(metadata_file_);
@@ -626,33 +698,88 @@ void GtkMainWnd::VideoRenderer::CloseYUVFile() {
   }
 }
 
-bool GtkMainWnd::VideoRenderer::SaveYUVFrame(const rtc::scoped_refptr<webrtc::I420BufferInterface>& buffer) {
-  if (!yuv_file_ || !metadata_file_) {
+bool GtkMainWnd::VideoRenderer::EncodeAndSaveFrame(const webrtc::VideoFrame& frame) {
+  if (!video_file_ || !metadata_file_ || !encoder_) {
     return false;
   }
 
-  size_t y_size = buffer->width() * buffer->height();
-  size_t uv_size = y_size / 4;
+  rtc::scoped_refptr<webrtc::I420BufferInterface> i420_buffer = frame.video_frame_buffer()->ToI420();
 
-  // Write YUV data
-  if (fwrite(buffer->DataY(), 1, y_size, yuv_file_) != y_size ||
-      fwrite(buffer->DataU(), 1, uv_size, yuv_file_) != uv_size ||
-      fwrite(buffer->DataV(), 1, uv_size, yuv_file_) != uv_size) {
-    RTC_LOG(LS_ERROR) << "Error writing YUV data";
+  // Scale the frame to the target size for encoding if necessary
+  rtc::scoped_refptr<webrtc::I420Buffer> scaled_buffer = webrtc::I420Buffer::Create(
+      target_width_, target_height_);
+  scaled_buffer->ScaleFrom(*i420_buffer);
+
+  // Create a new frame with the scaled buffer for encoding
+  webrtc::VideoFrame input_frame = webrtc::VideoFrame::Builder()
+      .set_video_frame_buffer(scaled_buffer)
+      .set_timestamp_us(frame.timestamp_us())
+      .set_timestamp_rtp(frame.timestamp())
+      .set_rotation(frame.rotation())
+      .build();
+
+  // Encode frame
+  std::vector<webrtc::VideoFrameType> frame_types;
+
+  int32_t encode_result = encoder_->Encode(input_frame, &frame_types);
+  if (encode_result != 0) {
+    RTC_LOG(LS_ERROR) << "Failed to encode frame: " << encode_result;
     return false;
   }
 
-  // Write metadata
-  int64_t current_timestamp = rtc::TimeMillis();
-  fprintf(metadata_file_, "%ld,%d,%d\n", 
-          static_cast<long>(current_timestamp - frame_timestamp_), buffer->width(), buffer->height());
-  
-  frame_timestamp_ = current_timestamp;
-  frame_count_++;
   return true;
 }
 
-std::string GtkMainWnd::VideoRenderer::GetOutputFilename() const {
+webrtc::EncodedImageCallback::Result GtkMainWnd::VideoRenderer::OnEncodedImage(
+    const webrtc::EncodedImage& encoded_image,
+    const webrtc::CodecSpecificInfo* codec_specific_info) {
+    if (!video_file_ || !metadata_file_) {
+        RTC_LOG(LS_ERROR) << "Video or metadata file not initialized";
+        return webrtc::EncodedImageCallback::Result(
+            webrtc::EncodedImageCallback::Result::ERROR_SEND_FAILED);
+    }
+
+    uint32_t rtp_timestamp = encoded_image.RtpTimestamp();
+
+    if (first_rtp_timestamp_ == 0) {
+        first_rtp_timestamp_ = rtp_timestamp;
+        first_frame_timestamp_us_ = rtc::TimeMicros();
+    }
+
+    // Calculate timestamp in the 90kHz clock domain
+    uint64_t timestamp = static_cast<uint64_t>(rtp_timestamp - first_rtp_timestamp_);
+
+    // Write IVF frame header
+    WriteIvfFrameHeader(encoded_image.size(), timestamp);
+
+    // Write encoded frame data
+    size_t written = fwrite(encoded_image.data(), 1, encoded_image.size(), video_file_);
+    if (written != encoded_image.size()) {
+        RTC_LOG(LS_ERROR) << "Error writing encoded frame data: " << written << " of " << encoded_image.size() << " bytes written";
+        return webrtc::EncodedImageCallback::Result(
+            webrtc::EncodedImageCallback::Result::ERROR_SEND_FAILED);
+    }
+
+    // Calculate timestamp in microseconds for metadata
+    uint64_t timestamp_us = rtc::TimeMicros() - first_frame_timestamp_us_;
+
+    // Write metadata
+    fprintf(metadata_file_, "%d,%" PRIu64 ",%u,%u,%zu,%d\n", 
+            frame_count_,
+            timestamp_us,
+            encoded_image._encodedWidth,
+            encoded_image._encodedHeight,
+            encoded_image.size(),
+            encoded_image.FrameType() == webrtc::VideoFrameType::kVideoFrameKey ? 1 : 0);
+
+    frame_count_++;
+
+    return webrtc::EncodedImageCallback::Result(
+        webrtc::EncodedImageCallback::Result::OK);
+}
+
+
+std::string GtkMainWnd::VideoRenderer::GetOutputFilename(const std::string& extension) const {
   const char* home_dir = std::getenv("HOME");
   if (!home_dir) {
     RTC_LOG(LS_ERROR) << "Unable to get HOME directory";
@@ -663,6 +790,6 @@ std::string GtkMainWnd::VideoRenderer::GetOutputFilename() const {
   mkdir(video_dir.c_str(), 0755);  // Create directory if it doesn't exist
 
   char filename[256];
-  snprintf(filename, sizeof(filename), "%s/output%d.yuv", video_dir.c_str(), peer_id_);
+  snprintf(filename, sizeof(filename), "%s/output%d%s", video_dir.c_str(), peer_id_, extension.c_str());
   return std::string(filename);
 }

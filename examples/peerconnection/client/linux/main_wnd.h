@@ -16,11 +16,15 @@
 #include <memory>
 #include <string>
 #include <cstdio>
+#include <vector>
 
 #include "api/media_stream_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
+#include "api/video/i420_buffer.h"
+#include "api/video_codecs/video_encoder.h"
+#include "modules/video_coding/include/video_codec_interface.h"
 #include "examples/peerconnection/client/main_wnd.h"
 #include "examples/peerconnection/client/peer_connection_client.h"
 
@@ -82,7 +86,8 @@ class GtkMainWnd : public MainWindow {
   void Draw(GtkWidget* widget, cairo_t* cr);
 
  protected:
-  class VideoRenderer : public rtc::VideoSinkInterface<webrtc::VideoFrame> {
+  class VideoRenderer : public rtc::VideoSinkInterface<webrtc::VideoFrame>,
+                        public webrtc::EncodedImageCallback {
   public:
     VideoRenderer(GtkMainWnd* main_wnd,
                   webrtc::VideoTrackInterface* track_to_render, 
@@ -91,16 +96,25 @@ class GtkMainWnd : public MainWindow {
     virtual ~VideoRenderer();
 
     // VideoSinkInterface implementation
-    void OnFrame(const webrtc::VideoFrame& frame) override;
+    void OnFrame(const webrtc::VideoFrame& video_frame) override;
+
+    // EncodedImageCallback implementation
+    webrtc::EncodedImageCallback::Result OnEncodedImage(
+        const webrtc::EncodedImage& encoded_image,
+        const webrtc::CodecSpecificInfo* codec_specific_info) override;
+
     const uint8_t* image() const { return image_.get(); }
     int width() const { return width_; }
     int height() const { return height_; }
 
   protected:
     void SetSize(int width, int height);
-    bool InitializeYUVFile();
-    void CloseYUVFile();
-    bool SaveYUVFrame(const rtc::scoped_refptr<webrtc::I420BufferInterface>& buffer);
+    bool InitializeVideoFile();
+    void CloseVideoFile();
+    bool EncodeAndSaveFrame(const webrtc::VideoFrame& frame);
+    std::string GetOutputFilename(const std::string& extension) const;
+    void WriteIvfFileHeader();
+    void WriteIvfFrameHeader(size_t frame_size, uint64_t timestamp);    
 
     std::unique_ptr<uint8_t[]> image_;
     int width_;
@@ -108,13 +122,22 @@ class GtkMainWnd : public MainWindow {
     GtkMainWnd* main_wnd_;
     rtc::scoped_refptr<webrtc::VideoTrackInterface> rendered_track_;
     int peer_id_;  
-    FILE* yuv_file_;
+    FILE* video_file_;
     FILE* metadata_file_;
     int frame_count_;
     bool save_enabled_;
-    int64_t frame_timestamp_;    
+    uint64_t first_frame_timestamp_us_;
+    uint32_t first_rtp_timestamp_;
+    double time_base_;
 
-    std::string GetOutputFilename() const;
+    // Video encoding related members
+    std::unique_ptr<webrtc::VideoEncoder> encoder_;
+    webrtc::VideoCodec codec_settings_;
+    std::vector<uint8_t> encoded_image_buffer_;
+    webrtc::EncodedImage encoded_image_;
+    int target_width_ = 1280;  // Default target width
+    int target_height_ = 720;  // Default target height
+    rtc::scoped_refptr<webrtc::I420Buffer> scaled_buffer_;    
   };
 
  protected:
