@@ -63,6 +63,8 @@ class Conductor : public webrtc::PeerConnectionObserver,
 
   Conductor(PeerConnectionClient* client, MainWindow* main_wnd, bool disable_gui, bool is_caller);
 
+  void SetStunServer(const std::string& ip, int port);
+
   bool connection_active() const;
 
   void AutoLogin(const std::string& server, int port);
@@ -79,6 +81,7 @@ class Conductor : public webrtc::PeerConnectionObserver,
   bool InitializePeerConnection();
   bool ReinitializePeerConnectionForLoopback();
   bool CreatePeerConnection();
+  std::string GetStunServerString() const;  
   void DeletePeerConnection();
   void EnsureStreamingUI();
   void AddTracks();
@@ -179,6 +182,8 @@ class Conductor : public webrtc::PeerConnectionObserver,
 
   bool disable_gui_;
   bool is_caller_;
+  std::string stun_server_ip_;
+  int stun_server_port_;  
 
   friend class StatsCallback;
 };

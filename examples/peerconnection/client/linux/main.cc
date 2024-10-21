@@ -13,6 +13,10 @@
 #include <stdio.h>
 #include <signal.h>
 
+#include <fstream>
+#include <string>
+#include <unordered_map>
+#include "absl/strings/str_split.h"
 #include "absl/flags/parse.h"
 #include "api/scoped_refptr.h"
 #include "examples/peerconnection/client/conductor.h"
@@ -88,6 +92,32 @@ void SignalHandler(int signum) {
   }
 }
 
+// Function to parse the configuration file
+std::unordered_map<std::string, std::string> ParseConfigFile(const std::string& filename) {
+  std::unordered_map<std::string, std::string> config;
+  std::ifstream file(filename);
+  std::string line;
+
+  while (std::getline(file, line)) {
+    // Skip empty lines and comments
+    if (line.empty() || line[0] == '#') {
+      continue;
+    }
+
+    std::vector<absl::string_view> parts = absl::StrSplit(line, absl::MaxSplits(':', 1));
+    if (parts.size() == 2) {
+      std::string key(parts[0]);
+      std::string value(parts[1]);
+      absl::StripAsciiWhitespace(&key);
+      absl::StripAsciiWhitespace(&value);
+      config[key] = value;
+    }
+  }
+
+  return config;
+}
+
+
 int main(int argc, char* argv[]) {
   gtk_init(&argc, &argv);
 // g_type_init API is deprecated (and does nothing) since glib 2.35.0, see:
@@ -103,28 +133,34 @@ int main(int argc, char* argv[]) {
 
   absl::ParseCommandLine(argc, argv);
 
+  // Parse the configuration file
+  std::string config_file = absl::GetFlag(FLAGS_config_file).empty() ? "client.cfg" : absl::GetFlag(FLAGS_config_file);
+  auto config = ParseConfigFile(config_file);  
+
   // InitFieldTrialsFromString stores the char*, so the char array must outlive
   // the application.
-  const std::string forced_field_trials =
-      absl::GetFlag(FLAGS_force_fieldtrials);
+  const std::string forced_field_trials = absl::GetFlag(FLAGS_force_fieldtrials);
   webrtc::field_trial::InitFieldTrialsFromString(forced_field_trials.c_str());
-  
-  bool disable_gui = absl::GetFlag(FLAGS_disable_gui);
-  bool is_caller = absl::GetFlag(FLAGS_is_caller);
-  RTC_LOG(LS_INFO) << "disable_gui flag: " << (disable_gui ? "true" : "false");
 
-  // Abort if the user specifies a port that is outside the allowed
-  // range [1, 65535].
-  if ((absl::GetFlag(FLAGS_port) < 1) || (absl::GetFlag(FLAGS_port) > 65535)) {
-    printf("Error: %i is not a valid port.\n", absl::GetFlag(FLAGS_port));
+  // Use configuration values, falling back to command-line flags if not present
+  std::string server = config.count("server_ip") ? config["server_ip"] : absl::GetFlag(FLAGS_server);
+  int port = config.count("server_port") ? std::stoi(config["server_port"]) : absl::GetFlag(FLAGS_port);
+  bool autoconnect = config.count("autoconnect") ? (config["autoconnect"] == "true") : absl::GetFlag(FLAGS_autoconnect);
+  bool autocall = config.count("autocall") ? (config["autocall"] == "true") : absl::GetFlag(FLAGS_autocall);
+  bool disable_gui = config.count("disable_gui") ? (config["disable_gui"] == "true") : absl::GetFlag(FLAGS_disable_gui);
+  bool is_caller = config.count("is_caller") ? (config["is_caller"] == "true") : absl::GetFlag(FLAGS_is_caller);
+  std::string stun_server_ip = config.count("stun_server_ip") ? config["stun_server_ip"] : "stun.l.google.com";
+  int stun_server_port = config.count("stun_server_port") ? std::stoi(config["stun_server_port"]) : 19302;
+
+  // Validate port
+  if (port < 1 || port > 65535) {
+    printf("Error: %i is not a valid port.\n", port);
     return -1;
   }
 
-  const std::string server = absl::GetFlag(FLAGS_server);
-  GtkMainWnd wnd(server.c_str(), absl::GetFlag(FLAGS_port),
-                 absl::GetFlag(FLAGS_autoconnect),
-                 absl::GetFlag(FLAGS_autocall),
-                 disable_gui);
+  RTC_LOG(LS_INFO) << "disable_gui flag: " << (disable_gui ? "true" : "false");  
+
+  GtkMainWnd wnd(server.c_str(), port, autoconnect, autocall, disable_gui);
   wnd.Create();
 
   CustomSocketServer socket_server(&wnd, disable_gui);
@@ -139,6 +175,7 @@ int main(int argc, char* argv[]) {
   PeerConnectionClient client;
   // create conductor
   auto conductor = rtc::make_ref_counted<Conductor>(&client, &wnd, disable_gui, is_caller);
+  conductor->SetStunServer(stun_server_ip, stun_server_port);
   socket_server.set_client(&client);
   socket_server.set_conductor(conductor.get());
 

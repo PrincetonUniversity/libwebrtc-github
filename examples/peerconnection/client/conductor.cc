@@ -135,7 +135,9 @@ Conductor::Conductor(PeerConnectionClient* client, MainWindow* main_wnd, bool di
       main_wnd_(main_wnd),
       logging_active_(false),
       disable_gui_(disable_gui),
-      is_caller_(is_caller) {
+      is_caller_(is_caller),
+      stun_server_ip_(""),
+      stun_server_port_(0) {
   client_->RegisterObserver(this);
   main_wnd->RegisterObserver(this);
 }
@@ -143,6 +145,18 @@ Conductor::Conductor(PeerConnectionClient* client, MainWindow* main_wnd, bool di
 Conductor::~Conductor() {
   RTC_DCHECK(!peer_connection_);
   StopLogging();
+}
+
+void Conductor::SetStunServer(const std::string& ip, int port) {
+  stun_server_ip_ = ip;
+  stun_server_port_ = port;
+}
+
+std::string Conductor::GetStunServerString() const {
+  if (!stun_server_ip_.empty() && stun_server_port_ > 0) {
+    return "stun:" + stun_server_ip_ + ":" + std::to_string(stun_server_port_);
+  }
+  return GetEnvVarOrDefault("WEBRTC_CONNECT", "stun:stun.l.google.com:19302");
 }
 
 bool Conductor::connection_active() const {
@@ -249,7 +263,8 @@ bool Conductor::CreatePeerConnection() {
   config.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
   // configure stun/turn server
   webrtc::PeerConnectionInterface::IceServer server;
-  server.uri = GetPeerConnectionString();
+  // server.uri = GetPeerConnectionString();
+  server.uri = GetStunServerString();
   config.servers.push_back(server);
 
   // create peer_connection_ object
