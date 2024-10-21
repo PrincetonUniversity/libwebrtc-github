@@ -13,10 +13,12 @@
 #include <stdio.h>
 #include <signal.h>
 
+#include <iostream>
 #include <fstream>
 #include <string>
 #include <unordered_map>
 #include "absl/strings/str_split.h"
+#include "absl/strings/strip.h"
 #include "absl/flags/parse.h"
 #include "api/scoped_refptr.h"
 #include "examples/peerconnection/client/conductor.h"
@@ -96,20 +98,30 @@ void SignalHandler(int signum) {
 std::unordered_map<std::string, std::string> ParseConfigFile(const std::string& filename) {
   std::unordered_map<std::string, std::string> config;
   std::ifstream file(filename);
-  std::string line;
+  
+  if (!file.is_open()) {
+    std::cerr << "Error: Unable to open config file: " << filename << std::endl;
+    return config;
+  }
 
+  std::string line;
   while (std::getline(file, line)) {
     // Skip empty lines and comments
     if (line.empty() || line[0] == '#') {
       continue;
     }
 
-    std::vector<absl::string_view> parts = absl::StrSplit(line, absl::MaxSplits(':', 1));
+    std::vector<std::string> parts = absl::StrSplit(line, absl::MaxSplits(':', 1));
     if (parts.size() == 2) {
-      std::string key(parts[0]);
-      std::string value(parts[1]);
-      absl::StripAsciiWhitespace(&key);
-      absl::StripAsciiWhitespace(&value);
+      std::string key = std::string(absl::StripAsciiWhitespace(parts[0]));
+      std::string value = std::string(absl::StripAsciiWhitespace(parts[1]));
+      
+      // Remove any inline comments from the value
+      size_t comment_pos = value.find('#');
+      if (comment_pos != std::string::npos) {
+        value = std::string(absl::StripAsciiWhitespace(value.substr(0, comment_pos)));
+      }
+
       config[key] = value;
     }
   }
@@ -134,8 +146,9 @@ int main(int argc, char* argv[]) {
   absl::ParseCommandLine(argc, argv);
 
   // Parse the configuration file
-  std::string config_file = absl::GetFlag(FLAGS_config_file).empty() ? "client.cfg" : absl::GetFlag(FLAGS_config_file);
-  auto config = ParseConfigFile(config_file);  
+  std::string config_file = absl::GetFlag(FLAGS_config_file).empty() ? "./client.cfg" : absl::GetFlag(FLAGS_config_file);
+  std::cout << "Attempting to read config file: " << config_file << std::endl;
+  auto config = ParseConfigFile(config_file); 
 
   // InitFieldTrialsFromString stores the char*, so the char array must outlive
   // the application.
@@ -152,13 +165,24 @@ int main(int argc, char* argv[]) {
   std::string stun_server_ip = config.count("stun_server_ip") ? config["stun_server_ip"] : "stun.l.google.com";
   int stun_server_port = config.count("stun_server_port") ? std::stoi(config["stun_server_port"]) : 19302;
 
+  // Print final values
+  std::cout << "\nFinal configuration values:" << std::endl;
+  std::cout << "server_ip: " << server << std::endl;
+  std::cout << "server_port: " << port << std::endl;
+  std::cout << "autoconnect: " << (autoconnect ? "true" : "false") << std::endl;
+  std::cout << "autocall: " << (autocall ? "true" : "false") << std::endl;
+  std::cout << "disable_gui: " << (disable_gui ? "true" : "false") << std::endl;
+  std::cout << "is_caller: " << (is_caller ? "true" : "false") << std::endl;
+  std::cout << "stun_server_ip: " << stun_server_ip << std::endl;
+  std::cout << "stun_server_port: " << stun_server_port << std::endl;
+
   // Validate port
   if (port < 1 || port > 65535) {
     printf("Error: %i is not a valid port.\n", port);
     return -1;
   }
 
-  RTC_LOG(LS_INFO) << "disable_gui flag: " << (disable_gui ? "true" : "false");  
+  RTC_LOG(LS_INFO) << "disable_gui flag: " << (disable_gui ? "true" : "false");
 
   GtkMainWnd wnd(server.c_str(), port, autoconnect, autocall, disable_gui);
   wnd.Create();
