@@ -145,6 +145,9 @@ Conductor::Conductor(PeerConnectionClient* client, MainWindow* main_wnd, bool di
 Conductor::~Conductor() {
   RTC_DCHECK(!peer_connection_);
   StopLogging();
+  if (sdp_log_) {
+      sdp_log_.reset();  // Close the SDP log file
+  }  
 }
 
 void Conductor::SetStunServer(const std::string& ip, int port) {
@@ -785,13 +788,13 @@ void Conductor::OnSuccess(webrtc::SessionDescriptionInterface* desc) {
   // SetLocalDescription is also an async operation, 
   // will call DummySetSessionDescriptionObserver::OnSuccess when finished.
   RTC_LOG(LS_INFO) << "Entering OnSuccess with description type: " << webrtc::SdpTypeToString(desc->GetType());
-  peer_connection_->SetLocalDescription(
-      DummySetSessionDescriptionObserver::Create().get(), desc);
-
+  
   std::string sdp;
   desc->ToString(&sdp);  // desc is the offer, it is formatted into a string
-
-  RTC_LOG(LS_INFO) << "SDP created: " << sdp.substr(0, 100) << "..."; // Log first 100 chars of SDP
+  LogLocalSDP(webrtc::SdpTypeToString(desc->GetType()), sdp);  
+  
+  peer_connection_->SetLocalDescription(
+      DummySetSessionDescriptionObserver::Create().get(), desc);
 
   // For loopback test. To save some connecting delay.
   if (loopback_) {
@@ -836,6 +839,21 @@ void Conductor::SendMessage(const std::string& json_object) {
   main_wnd_->QueueUIThreadCallback(SEND_MESSAGE_TO_PEER, msg);
 }
 
+
+void Conductor::LogLocalSDP(const std::string& type, const std::string& sdp) {
+    if (!sdp_log_) {
+        std::string filename = "sdp_" + std::to_string(my_id_) + ".txt";
+        sdp_log_ = std::make_unique<std::ofstream>(filename, std::ios::app);
+    }
+    
+    if (sdp_log_->is_open()) {
+        *sdp_log_ << "Time: " << rtc::TimeMillis() << "\n"
+                 << "LocalDescription Type: " << type << "\n"
+                 << "SDP:\n" << sdp << "\n"
+                 << "----------------------------------------\n";
+        sdp_log_->flush();
+    }
+}
 
 // New methods for logging
 void Conductor::StartLogging() {
@@ -891,6 +909,7 @@ void Conductor::StartLogging() {
                   << "fir_count,pli_count,nack_count,qp_sum,active,power_efficient_encoder,"
                   << "scalability_mode\n";
 
+    // start logging thread
     logging_thread_ = std::make_unique<std::thread>(&Conductor::LoggingThread, this);
   }
 }

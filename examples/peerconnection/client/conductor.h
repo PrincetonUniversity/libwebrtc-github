@@ -157,6 +157,7 @@ class Conductor : public webrtc::PeerConnectionObserver,
   void LogMetrics();
   void OnStatsDelivered(
       const rtc::scoped_refptr<const webrtc::RTCStatsReport>& report);
+  void LogLocalSDP(const std::string& type, const std::string& sdp);
 
   int my_id_;
   int peer_id_; // the id of the remote peer
@@ -179,6 +180,7 @@ class Conductor : public webrtc::PeerConnectionObserver,
   std::unique_ptr<CSVWriter> pc_log_;
   std::unique_ptr<CSVWriter> in_rtp_log_;
   std::unique_ptr<CSVWriter> out_rtp_log_;
+  std::unique_ptr<std::ofstream> sdp_log_;
 
   bool disable_gui_;
   bool is_caller_;
