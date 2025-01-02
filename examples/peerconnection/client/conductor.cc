@@ -29,6 +29,8 @@
 #include "api/audio_options.h"
 #include "api/create_peerconnection_factory.h"
 #include "api/rtp_sender_interface.h"
+#include "api/video_codecs/sdp_video_format.h"
+#include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_decoder_factory_template.h"
 #include "api/video_codecs/video_decoder_factory_template_dav1d_adapter.h"
@@ -56,6 +58,44 @@
 #include "examples/peerconnection/client/csv_writer.h"
 #include "api/stats/rtc_stats_report.h"
 #include "api/stats/rtcstats_objects.h"
+
+// 
+class CustomVideoEncoderFactory : public webrtc::VideoEncoderFactory {
+ public:
+  CustomVideoEncoderFactory() {
+    internal_factory_ = std::make_unique<webrtc::VideoEncoderFactoryTemplate<
+        webrtc::LibaomAv1EncoderTemplateAdapter,
+        webrtc::LibvpxVp8EncoderTemplateAdapter,
+        webrtc::LibvpxVp9EncoderTemplateAdapter,
+        webrtc::OpenH264EncoderTemplateAdapter>>();
+  }
+
+  std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override {
+    std::vector<webrtc::SdpVideoFormat> formats = internal_factory_->GetSupportedFormats();
+    for (auto& format : formats) {
+      if (format.name == "AV1") {
+        format.scalability_modes = {webrtc::ScalabilityMode::kL1T2};
+      }
+    }
+    return formats;
+  }
+
+  std::unique_ptr<webrtc::VideoEncoder> Create(
+      const webrtc::Environment& env,
+      const webrtc::SdpVideoFormat& format) override {
+    return internal_factory_->Create(env, format);
+  }
+
+  webrtc::VideoEncoderFactory::CodecSupport QueryCodecSupport(
+      const webrtc::SdpVideoFormat& format,
+      absl::optional<std::string> scalability_mode) const override {
+    return internal_factory_->QueryCodecSupport(format, scalability_mode);
+  }
+
+ private:
+  std::unique_ptr<webrtc::VideoEncoderFactory> internal_factory_;
+};
+
 
 namespace {
 // Names used for a IceCandidate JSON object.
@@ -187,22 +227,35 @@ bool Conductor::InitializePeerConnection() {
 
   // 1. create PeerConnectionFactory with audio and video codecs
   RTC_LOG(LS_INFO) << "1. Creating PeerConnectionFactory";
+  // peer_connection_factory_ = webrtc::CreatePeerConnectionFactory(
+  //     nullptr /* network_thread */, nullptr /* worker_thread */,
+  //     signaling_thread_.get(), nullptr /* default_adm */,
+  //     webrtc::CreateBuiltinAudioEncoderFactory(),
+  //     webrtc::CreateBuiltinAudioDecoderFactory(),
+  //     std::make_unique<webrtc::VideoEncoderFactoryTemplate<
+  //         webrtc::LibaomAv1EncoderTemplateAdapter,
+  //         webrtc::LibvpxVp8EncoderTemplateAdapter,
+  //         webrtc::LibvpxVp9EncoderTemplateAdapter,
+  //         webrtc::OpenH264EncoderTemplateAdapter>>(),
+  //     std::make_unique<webrtc::VideoDecoderFactoryTemplate<
+  //         webrtc::Dav1dDecoderTemplateAdapter,
+  //         webrtc::LibvpxVp8DecoderTemplateAdapter,
+  //         webrtc::LibvpxVp9DecoderTemplateAdapter,
+  //         webrtc::OpenH264DecoderTemplateAdapter>>(),
+  //     nullptr /* audio_mixer */, nullptr /* audio_processing */);
   peer_connection_factory_ = webrtc::CreatePeerConnectionFactory(
       nullptr /* network_thread */, nullptr /* worker_thread */,
       signaling_thread_.get(), nullptr /* default_adm */,
       webrtc::CreateBuiltinAudioEncoderFactory(),
       webrtc::CreateBuiltinAudioDecoderFactory(),
-      std::make_unique<webrtc::VideoEncoderFactoryTemplate<
-          webrtc::LibaomAv1EncoderTemplateAdapter,
-          webrtc::LibvpxVp8EncoderTemplateAdapter,
-          webrtc::LibvpxVp9EncoderTemplateAdapter,
-          webrtc::OpenH264EncoderTemplateAdapter>>(),
+      std::make_unique<CustomVideoEncoderFactory>(),
       std::make_unique<webrtc::VideoDecoderFactoryTemplate<
           webrtc::Dav1dDecoderTemplateAdapter,
           webrtc::LibvpxVp8DecoderTemplateAdapter,
           webrtc::LibvpxVp9DecoderTemplateAdapter,
           webrtc::OpenH264DecoderTemplateAdapter>>(),
-      nullptr /* audio_mixer */, nullptr /* audio_processing */);
+      nullptr /* audio_mixer */, nullptr /* audio_processing */);  
+  
 
   if (!peer_connection_factory_) {
     RTC_LOG(LS_ERROR) << "Failed to initialize PeerConnectionFactory";
