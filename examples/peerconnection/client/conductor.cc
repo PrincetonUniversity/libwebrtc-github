@@ -29,6 +29,8 @@
 #include "api/audio_options.h"
 #include "api/create_peerconnection_factory.h"
 #include "api/rtp_sender_interface.h"
+#include "api/field_trials_view.h"
+#include "system_wrappers/include/field_trial.h"
 #include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/video_decoder_factory.h"
@@ -270,6 +272,10 @@ bool Conductor::InitializePeerConnection() {
   //         webrtc::LibvpxVp9DecoderTemplateAdapter,
   //         webrtc::OpenH264DecoderTemplateAdapter>>(),
   //     nullptr /* audio_mixer */, nullptr /* audio_processing */);
+
+  std::string field_trials = "WebRTC-DependencyDescriptorAdvertised/Enabled/";
+  webrtc::field_trial::InitFieldTrialsFromString(field_trials.c_str());  
+
   peer_connection_factory_ = webrtc::CreatePeerConnectionFactory(
       nullptr /* network_thread */, nullptr /* worker_thread */,
       signaling_thread_.get(), nullptr /* default_adm */,
@@ -278,7 +284,8 @@ bool Conductor::InitializePeerConnection() {
       std::make_unique<CustomVideoEncoderFactory>(),
       std::make_unique<webrtc::VideoDecoderFactoryTemplate<
           webrtc::Dav1dDecoderTemplateAdapter>>(),
-      nullptr /* audio_mixer */, nullptr /* audio_processing */);  
+      nullptr /* audio_mixer */, nullptr /* audio_processing */
+      , nullptr /* AudioFrameProcessor */);  
   
 
   if (!peer_connection_factory_) {
