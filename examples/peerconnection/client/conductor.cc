@@ -64,10 +64,7 @@ class CustomVideoEncoderFactory : public webrtc::VideoEncoderFactory {
  public:
   CustomVideoEncoderFactory() {
     internal_factory_ = std::make_unique<webrtc::VideoEncoderFactoryTemplate<
-        webrtc::LibaomAv1EncoderTemplateAdapter,
-        webrtc::LibvpxVp8EncoderTemplateAdapter,
-        webrtc::LibvpxVp9EncoderTemplateAdapter,
-        webrtc::OpenH264EncoderTemplateAdapter>>();
+        webrtc::LibaomAv1EncoderTemplateAdapter>>();
   }
 
   std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override {
@@ -250,10 +247,7 @@ bool Conductor::InitializePeerConnection() {
       webrtc::CreateBuiltinAudioDecoderFactory(),
       std::make_unique<CustomVideoEncoderFactory>(),
       std::make_unique<webrtc::VideoDecoderFactoryTemplate<
-          webrtc::Dav1dDecoderTemplateAdapter,
-          webrtc::LibvpxVp8DecoderTemplateAdapter,
-          webrtc::LibvpxVp9DecoderTemplateAdapter,
-          webrtc::OpenH264DecoderTemplateAdapter>>(),
+          webrtc::Dav1dDecoderTemplateAdapter>>(),
       nullptr /* audio_mixer */, nullptr /* audio_processing */);  
   
 
@@ -317,6 +311,7 @@ bool Conductor::CreatePeerConnection() {
   webrtc::PeerConnectionInterface::RTCConfiguration config;
   // format of sdp
   config.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
+
   // configure stun/turn server
   webrtc::PeerConnectionInterface::IceServer server;
   // server.uri = GetPeerConnectionString();
