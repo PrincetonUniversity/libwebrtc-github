@@ -60,73 +60,69 @@
 #include "api/stats/rtcstats_objects.h"
 
 // 
-// class CustomVideoEncoderFactory : public webrtc::VideoEncoderFactory {
-//  public:
-//   CustomVideoEncoderFactory() {
-//     internal_factory_ = std::make_unique<webrtc::VideoEncoderFactoryTemplate<
-//         webrtc::LibaomAv1EncoderTemplateAdapter>>();
+class CustomVideoEncoderFactory : public webrtc::VideoEncoderFactory {
+ public:
+  CustomVideoEncoderFactory() {
+    internal_factory_ = std::make_unique<webrtc::VideoEncoderFactoryTemplate<
+        webrtc::LibaomAv1EncoderTemplateAdapter>>();
+  }
+
+  std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override {
+    // Instead of modifying existing formats, create a new format with only L1T2
+    std::vector<webrtc::SdpVideoFormat> formats;
+    webrtc::SdpVideoFormat av1_format("AV1");
     
-//     // Log initial supported formats
-//     RTC_LOG(LS_INFO) << "Initial supported formats:";
-//     auto initial_formats = internal_factory_->GetSupportedFormats();
-//     for (const auto& format : initial_formats) {
-//       RTC_LOG(LS_INFO) << "Codec: " << format.name << " Scalability modes:";
-//       for (const auto& mode : format.scalability_modes) {
-//         RTC_LOG(LS_INFO) << "  " << ScalabilityModeToString(mode);
-//       }
-//     }
-//   }
-
-//   std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override {
-//     std::vector<webrtc::SdpVideoFormat> formats;
-//     auto original_formats = internal_factory_->GetSupportedFormats();
+    // Set required parameters
+    av1_format.parameters["profile"] = "0";
+    av1_format.parameters["level-idx"] = "5";
+    av1_format.parameters["tier"] = "0";
+    av1_format.parameters["scalability-mode"] = "L1T2";
     
-//     for (auto format : original_formats) {
-//       if (format.name == "AV1") {
-//         // Clear any existing scalability modes and only set L1T2
-//         format.scalability_modes.clear();
-//         format.scalability_modes = {webrtc::ScalabilityMode::kL1T2};
-        
-//         // Add L1T2 to parameters explicitly
-//         format.parameters["scalability-mode"] = "L1T2";
-        
-//         formats.push_back(format);
-        
-//         RTC_LOG(LS_INFO) << "Offering AV1 with forced L1T2 scalability mode";
-//       }
-//     }
-//     return formats;
-//   }
+    // Only include L1T2 in scalability modes
+    av1_format.scalability_modes = {webrtc::ScalabilityMode::kL1T2};
+    
+    formats.push_back(av1_format);
+    
+    RTC_LOG(LS_INFO) << "GetSupportedFormats: Offering single AV1 format with L1T2";
+    return formats;
+  }
 
-//   webrtc::VideoEncoderFactory::CodecSupport QueryCodecSupport(
-//       const webrtc::SdpVideoFormat& format,
-//       absl::optional<std::string> scalability_mode) const override {
-//     // Only support L1T2 for AV1
-//     if (format.name == "AV1") {
-//       if (!scalability_mode.has_value() || scalability_mode.value() == "L1T2") {
-//         return {.is_supported = true};
-//       }
-//       return {.is_supported = false};
-//     }
-//     return internal_factory_->QueryCodecSupport(format, scalability_mode);
-//   }
+  std::unique_ptr<webrtc::VideoEncoder> Create(
+      const webrtc::Environment& env,
+      const webrtc::SdpVideoFormat& format) override {
+    RTC_LOG(LS_INFO) << "Create called for codec: " << format.name;
+    if (format.name == "AV1") {
+      // Always create encoder with L1T2 regardless of input format
+      webrtc::SdpVideoFormat modified_format = format;
+      modified_format.parameters["scalability-mode"] = "L1T2";
+      modified_format.scalability_modes = {webrtc::ScalabilityMode::kL1T2};
+      
+      RTC_LOG(LS_INFO) << "Creating AV1 encoder with forced L1T2 mode";
+      return internal_factory_->Create(env, modified_format);
+    }
+    return nullptr;  // Only support AV1
+  }
 
-//   std::unique_ptr<webrtc::VideoEncoder> Create(
-//       const webrtc::Environment& env,
-//       const webrtc::SdpVideoFormat& format) override {
-//     if (format.name == "AV1") {
-//       // Ensure format has L1T2 parameter
-//       auto modified_format = format;
-//       modified_format.parameters["scalability-mode"] = "L1T2";
-//       return internal_factory_->Create(env, modified_format);
-//     }
-//     return internal_factory_->Create(env, format);
-//   }
+  webrtc::VideoEncoderFactory::CodecSupport QueryCodecSupport(
+      const webrtc::SdpVideoFormat& format,
+      absl::optional<std::string> scalability_mode) const override {
+    if (format.name != "AV1") {
+      return {.is_supported = false};
+    }
+    
+    // Only support L1T2 or unspecified mode
+    if (!scalability_mode.has_value() || scalability_mode.value() == "L1T2") {
+      return {.is_supported = true};
+    }
+    
+    RTC_LOG(LS_INFO) << "Rejecting unsupported scalability mode: " 
+                     << scalability_mode.value_or("none");
+    return {.is_supported = false};
+  }
 
-//  private:
-//   std::unique_ptr<webrtc::VideoEncoderFactory> internal_factory_;
-// };
-
+ private:
+  std::unique_ptr<webrtc::VideoEncoderFactory> internal_factory_;
+};
 
 namespace {
 // Names used for a IceCandidate JSON object.
@@ -279,8 +275,7 @@ bool Conductor::InitializePeerConnection() {
       signaling_thread_.get(), nullptr /* default_adm */,
       webrtc::CreateBuiltinAudioEncoderFactory(),
       webrtc::CreateBuiltinAudioDecoderFactory(),
-      std::make_unique<webrtc::VideoEncoderFactoryTemplate<
-          webrtc::LibaomAv1EncoderTemplateAdapter>>(),
+      std::make_unique<CustomVideoEncoderFactory>(),
       std::make_unique<webrtc::VideoDecoderFactoryTemplate<
           webrtc::Dav1dDecoderTemplateAdapter>>(),
       nullptr /* audio_mixer */, nullptr /* audio_processing */);  
