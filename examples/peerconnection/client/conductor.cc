@@ -29,6 +29,7 @@
 #include "api/audio_options.h"
 #include "api/create_peerconnection_factory.h"
 #include "api/rtp_sender_interface.h"
+#include "api/rtp_parameters.h"
 #include "api/field_trials_view.h"
 #include "system_wrappers/include/field_trial.h"
 #include "api/video_codecs/sdp_video_format.h"
@@ -736,8 +737,36 @@ void Conductor::AddTracks() {
     // send video track to local renderer
     main_wnd_->StartLocalRenderer(video_track_.get(), my_id_);
 
+    // Create RtpEncodingParameters
+    std::vector<webrtc::RtpEncodingParameters> encoding_params;
+    webrtc::RtpEncodingParameters params;
+    params.scalability_mode = "L1T2"; // 1 spatial, 2 temporal layers
+    encoding_params.push_back(params);
+
     // add video track to PeerConnection
     result_or_error = peer_connection_->AddTrack(video_track_, {kStreamId});
+    if (result_or_error.ok()) {
+        auto sender = result_or_error.value();
+
+        // Step 1: Get the current RTP parameters from the sender
+        webrtc::RtpParameters parameters = sender->GetParameters();
+
+        // Step 2: Modify the encodings within the RTP parameters
+        if (!parameters.encodings.empty()) {
+            parameters.encodings[0].max_bitrate_bps = 5000000; // Set max bitrate to 5 mbps
+            parameters.encodings[0].scalability_mode = "L1T2"; // Example scalability mode
+        } else {
+            RTC_LOG(LS_ERROR) << "No encodings available in RTP parameters!";
+        }        
+
+        // Step 3: Apply the updated parameters back to the sender
+        auto result = sender->SetParameters(parameters);
+        if (!result.ok()) {
+            RTC_LOG(LS_ERROR) << "Failed to set RTP parameters: " << result.message();
+        }        
+        // sender->SetParameters(params);
+    }
+    
     if (!result_or_error.ok()) {
       RTC_LOG(LS_ERROR) << "Failed to add video track to PeerConnection: "
                         << result_or_error.error().message();
