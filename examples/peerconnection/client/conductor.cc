@@ -299,6 +299,11 @@ bool Conductor::InitializePeerConnection() {
     return false;
   }
 
+  // Disable encryption for the initial PeerConnection:
+  webrtc::PeerConnectionFactoryInterface::Options options;
+  options.disable_encryption = true;
+  peer_connection_factory_->SetOptions(options);  
+
   // 2. create PeerConnection
   RTC_LOG(LS_INFO) << "2. Creating PeerConnection";
   if (!CreatePeerConnection()) {
@@ -337,7 +342,7 @@ bool Conductor::ReinitializePeerConnectionForLoopback() {
     peer_connection_->CreateOffer(
         this, webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
   }
-  options.disable_encryption = false;
+  options.disable_encryption = true;
   peer_connection_factory_->SetOptions(options);
   return peer_connection_ != nullptr;
 }
