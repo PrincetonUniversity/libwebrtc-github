@@ -409,9 +409,9 @@ bool BaseChannel::SendPacket(bool rtcp,
       return false;
     }
 
-    RTC_DLOG(LS_WARNING) << "Sending an " << (rtcp ? "RTCP" : "RTP")
-                         << " packet without encryption for " << ToString()
-                         << ".";
+    // RTC_DLOG(LS_WARNING) << "Sending an " << (rtcp ? "RTCP" : "RTP")
+    //                      << " packet without encryption for " << ToString()
+    //                      << ".";
   }
 
   return rtcp ? rtp_transport_->SendRtcpPacket(packet, options, PF_SRTP_BYPASS)
