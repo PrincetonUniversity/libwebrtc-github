@@ -9,6 +9,7 @@
 #include "api/units/data_rate.h"
 #include "api/units/timestamp.h"
 #include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
@@ -23,6 +24,9 @@ class GccMetricsLogger {
   // Close the log file
   void Close();
   
+  // Set the peer ID for logging purposes
+  void SetPeerId(int peer_id);
+  
   // Log trendline metrics
   void LogTrendlineMetrics(
       Timestamp at_time,
@@ -30,11 +34,10 @@ class GccMetricsLogger {
       double threshold,
       BandwidthUsage state);
   
-  // Log bandwidth estimate metrics
-  void LogBweMetrics(
+  // Log delay-based BWE metrics
+  void LogDelayBasedBweMetrics(
       Timestamp at_time,
       DataRate target_bitrate,
-      DataRate actual_bitrate,
       BandwidthUsage delay_detector_state);
   
   // Log network controller metrics
@@ -50,14 +53,15 @@ class GccMetricsLogger {
   ~GccMetricsLogger();
   
   // Write CSV header if file is new
-  void WriteHeader();
+  void WriteHeader() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   
-  static GccMetricsLogger* instance_;
-  static webrtc::Mutex instance_lock_;
+  // Convert BandwidthUsage to string
+  std::string BandwidthUsageToString(BandwidthUsage usage);
   
-  std::ofstream log_file_;
-  webrtc::Mutex file_lock_;
-  bool is_initialized_;
+  Mutex mutex_;
+  std::ofstream log_file_ RTC_GUARDED_BY(mutex_);
+  bool is_initialized_ RTC_GUARDED_BY(mutex_);
+  int peer_id_ RTC_GUARDED_BY(mutex_);
 };
 
 }  // namespace webrtc

@@ -28,6 +28,7 @@
 #include "modules/congestion_controller/goog_cc/inter_arrival_delta.h"
 #include "modules/congestion_controller/goog_cc/link_capacity_estimator.h"
 #include "modules/congestion_controller/goog_cc/probe_bitrate_estimator.h"
+#include "modules/congestion_controller/goog_cc/gcc_metrics_logger.h"
 #include "modules/remote_bitrate_estimator/aimd_rate_control.h"
 #include "modules/remote_bitrate_estimator/inter_arrival.h"
 #include "rtc_base/experiments/struct_parameters_parser.h"

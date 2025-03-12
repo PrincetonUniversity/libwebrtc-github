@@ -990,6 +990,9 @@ void Conductor::StartLogging() {
     snprintf(filename, sizeof(filename), "%s-out-rtp-%d.csv", prefix.c_str(), my_id_);
     out_rtp_log_ = std::make_unique<CSVWriter>(filename);
 
+    // Initialize GCC logging
+    InitializeGccLogging();    
+
     // Peer connection stats header
     *pc_log_ << "timestamp,transport_id,local_candidate_id,remote_candidate_id,state,priority,"
              << "nominated,writable,packets_sent,packets_received,bytes_sent,bytes_received,"
@@ -1028,13 +1031,16 @@ void Conductor::StartLogging() {
                   << "fir_count,pli_count,nack_count,qp_sum,active,power_efficient_encoder,"
                   << "scalability_mode\n";
 
-    // start logging thread
-    logging_thread_ = std::make_unique<std::thread>(&Conductor::LoggingThread, this);
+    // Start logging thread
+    logging_thread_ = std::make_unique<std::thread>(&Conductor::LoggingThread, this);   
   }
 }
 
 void Conductor::StopLogging() {
   if (logging_active_.exchange(false)) {
+    // Shutdown GCC logging
+    ShutdownGccLogging();
+
     if (logging_thread_ && logging_thread_->joinable()) {
       logging_thread_->join();
     }
@@ -1253,3 +1259,27 @@ void Conductor::OnStatsDelivered(
   out_rtp_log_->flush();
 }
 
+
+// Initialize GCC logging
+
+void Conductor::InitializeGccLogging() {
+  if (my_id_ == -1) {
+    RTC_LOG(LS_WARNING) << "Cannot initialize GCC logging - no peer ID";
+    return;
+  }
+  
+  // Use the same naming convention as other logs
+  std::string prefix = std::to_string(start_time_);
+  char filename[256];
+  snprintf(filename, sizeof(filename), "%s-gcc-%d.csv", prefix.c_str(), my_id_);
+  
+  webrtc::GccMetricsLogger::GetInstance()->SetPeerId(my_id_);
+  webrtc::GccMetricsLogger::GetInstance()->Initialize(filename);
+  
+  RTC_LOG(LS_INFO) << "GCC metrics logging initialized to: " << filename;
+}
+
+void Conductor::ShutdownGccLogging() {
+  webrtc::GccMetricsLogger::GetInstance()->Close();
+  RTC_LOG(LS_INFO) << "GCC metrics logging closed";
+}

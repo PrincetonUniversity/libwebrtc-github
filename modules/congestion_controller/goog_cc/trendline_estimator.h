@@ -88,9 +88,9 @@ class TrendlineEstimator : public DelayIncreaseDetectorInterface {
     double raw_delay_ms;
   };
 
-  // For testing and logging
+  // Accessors for testing and logging
   double GetModifiedTrend() const { return prev_modified_trend_; }
-  double GetThreshold() const { return threshold_; }  
+  double GetThreshold() const { return threshold_; } 
 
  private:
   friend class GoogCcStatePrinter;

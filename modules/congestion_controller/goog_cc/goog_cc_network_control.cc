@@ -673,6 +673,11 @@ void GoogCcNetworkController::MaybeTriggerOnNetworkChanged(
     last_stable_target_rate_ = stable_target_rate;
     last_loss_base_state_ = loss_based_state;
 
+    // Log network controller metrics
+    GccMetricsLogger::GetInstance()->LogNetworkControllerMetrics(
+      at_time, loss_based_target_rate, pushback_target_rate, 
+      stable_target_rate, fraction_loss);
+
     alr_detector_->SetEstimatedBitrate(loss_based_target_rate.bps());
 
     TimeDelta bwe_period = delay_based_bwe_->GetExpectedBwePeriod();

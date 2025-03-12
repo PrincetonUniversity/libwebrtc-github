@@ -278,6 +278,9 @@ void TrendlineEstimator::Detect(double trend, double ts_delta, int64_t now_ms) {
   const double modified_trend =
       std::min(num_of_deltas_, kMinNumDeltas) * trend * threshold_gain_;
   prev_modified_trend_ = modified_trend;
+
+  BandwidthUsage prev_hypothesis = hypothesis_;
+
   if (modified_trend > threshold_) {
     if (time_over_using_ == -1) {
       // Initialize the timer. Assume that we've been
@@ -305,6 +308,15 @@ void TrendlineEstimator::Detect(double trend, double ts_delta, int64_t now_ms) {
     overuse_counter_ = 0;
     hypothesis_ = BandwidthUsage::kBwNormal;
   }
+
+  // Log metrics if state changes or periodically (every 200ms)
+  static int64_t last_log_time = 0;
+  if (hypothesis_ != prev_hypothesis || now_ms - last_log_time >= 200) {
+    GccMetricsLogger::GetInstance()->LogTrendlineMetrics(
+        Timestamp::Millis(now_ms), modified_trend, threshold_, hypothesis_);
+    last_log_time = now_ms;
+  } 
+
   prev_trend_ = trend;
   UpdateThreshold(modified_trend, now_ms);
 }

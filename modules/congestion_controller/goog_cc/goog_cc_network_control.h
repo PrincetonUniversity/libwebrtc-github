@@ -34,6 +34,7 @@
 #include "modules/congestion_controller/goog_cc/probe_bitrate_estimator.h"
 #include "modules/congestion_controller/goog_cc/probe_controller.h"
 #include "modules/congestion_controller/goog_cc/send_side_bandwidth_estimation.h"
+#include "modules/congestion_controller/goog_cc/gcc_metrics_logger.h"
 #include "rtc_base/experiments/field_trial_parser.h"
 #include "rtc_base/experiments/rate_control_settings.h"
 

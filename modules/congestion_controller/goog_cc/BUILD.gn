@@ -12,6 +12,8 @@ rtc_library("goog_cc") {
   sources = [
     "goog_cc_network_control.cc",
     "goog_cc_network_control.h",
+    "gcc_metrics_logger.cc",
+    "gcc_metrics_logger.h",
   ]
 
   deps = [

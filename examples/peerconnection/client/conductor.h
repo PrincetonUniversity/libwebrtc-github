@@ -28,6 +28,7 @@
 #include "examples/peerconnection/client/main_wnd.h"
 #include "examples/peerconnection/client/peer_connection_client.h"
 #include "rtc_base/thread.h"
+#include "modules/congestion_controller/goog_cc/gcc_metrics_logger.h"
 
 namespace webrtc {
 class VideoCaptureModule;
@@ -159,6 +160,10 @@ class Conductor : public webrtc::PeerConnectionObserver,
       const rtc::scoped_refptr<const webrtc::RTCStatsReport>& report);
   void LogLocalSDP(const std::string& type, const std::string& sdp);
 
+  // New methods for gcc logging
+  void InitializeGccLogging();
+  void ShutdownGccLogging();
+
   int my_id_;
   int peer_id_; // the id of the remote peer
   bool loopback_; 
@@ -181,6 +186,9 @@ class Conductor : public webrtc::PeerConnectionObserver,
   std::unique_ptr<CSVWriter> in_rtp_log_;
   std::unique_ptr<CSVWriter> out_rtp_log_;
   std::unique_ptr<std::ofstream> sdp_log_;
+
+  // New member variables for gcc logging
+  std::unique_ptr<std::ofstream> gcc_log_;
 
   bool disable_gui_;
   bool is_caller_;

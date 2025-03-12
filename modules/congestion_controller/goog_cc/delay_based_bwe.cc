@@ -257,6 +257,10 @@ DelayBasedBwe::Result DelayBasedBwe::MaybeUpdateEstimate(
           bitrate.bps(), detector_state));
     }
 
+    // Log BWE metrics
+    GccMetricsLogger::GetInstance()->LogDelayBasedBweMetrics(
+      at_time, bitrate, detector_state);   
+
     prev_bitrate_ = bitrate;
     prev_state_ = detector_state;
   }
