@@ -20,6 +20,7 @@
 #include "api/network_state_predictor.h"
 #include "api/transport/bandwidth_usage.h"
 #include "modules/congestion_controller/goog_cc/delay_increase_detector_interface.h"
+#include "modules/congestion_controller/goog_cc/gcc_metrics_logger.h"
 #include "rtc_base/experiments/struct_parameters_parser.h"
 
 namespace webrtc {
@@ -86,6 +87,10 @@ class TrendlineEstimator : public DelayIncreaseDetectorInterface {
     double smoothed_delay_ms;
     double raw_delay_ms;
   };
+
+  // For testing and logging
+  double GetModifiedTrend() const { return prev_modified_trend_; }
+  double GetThreshold() const { return threshold_; }  
 
  private:
   friend class GoogCcStatePrinter;
