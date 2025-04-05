@@ -164,7 +164,7 @@ class CapturerTrackSource : public webrtc::VideoTrackSource {
       return nullptr;
     }
     int num_devices = info->NumberOfDevices();
-    for (int i = 0; i < num_devices; ++i) {
+    for (int i = num_devices-1; i >= 0; --i) {
       capturer = absl::WrapUnique(
           webrtc::test::VcmCapturer::Create(kWidth, kHeight, kFps, i));
       if (capturer) {
@@ -758,7 +758,7 @@ void Conductor::AddTracks() {
 
         // Step 2: Modify the encodings within the RTP parameters
         if (!parameters.encodings.empty()) {
-            parameters.encodings[0].max_bitrate_bps = 5000000; // Set max bitrate to 5 mbps
+            parameters.encodings[0].max_bitrate_bps = 20000000; // Set max bitrate to 5 mbps
             parameters.encodings[0].scalability_mode = "L1T2"; // Example scalability mode
         } else {
             RTC_LOG(LS_ERROR) << "No encodings available in RTP parameters!";
