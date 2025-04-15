@@ -185,6 +185,7 @@ class Conductor : public webrtc::PeerConnectionObserver,
   std::unique_ptr<CSVWriter> pc_log_;
   std::unique_ptr<CSVWriter> in_rtp_log_;
   std::unique_ptr<CSVWriter> out_rtp_log_;
+  std::unique_ptr<CSVWriter> video_src_log_;
   std::unique_ptr<std::ofstream> sdp_log_;
 
   // New member variables for gcc logging

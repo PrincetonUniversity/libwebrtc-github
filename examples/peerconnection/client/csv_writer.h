@@ -71,4 +71,10 @@ bool CSVWriter::hasValue(const webrtc::RTCOutboundRtpStreamStats& stats, const s
 template<>
 std::string CSVWriter::getValue(const webrtc::RTCOutboundRtpStreamStats& stats, const std::string& key) const;
 
+template<>
+bool CSVWriter::hasValue(const webrtc::RTCVideoSourceStats& stats, const std::string& key) const;
+
+template<>
+std::string CSVWriter::getValue(const webrtc::RTCVideoSourceStats& stats, const std::string& key) const;
+
 #endif  // CSV_WRITER_H_

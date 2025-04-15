@@ -291,3 +291,32 @@ std::string CSVWriter::getValue(const webrtc::RTCOutboundRtpStreamStats& stats, 
     if (key == "rtx_ssrc") return std::to_string(stats.rtx_ssrc.value_or(0));
     return "";
 }
+
+// Specialization for RTCVideoSourceStats
+template<>
+bool CSVWriter::hasValue(const webrtc::RTCVideoSourceStats& stats, const std::string& key) const {
+    // RTCMediaSourceStats members (parent class)
+    if (key == "track_identifier") return static_cast<const webrtc::RTCMediaSourceStats&>(stats).track_identifier.has_value();
+    if (key == "kind") return static_cast<const webrtc::RTCMediaSourceStats&>(stats).kind.has_value();
+    
+    // RTCVideoSourceStats members
+    if (key == "width") return stats.width.has_value();
+    if (key == "height") return stats.height.has_value();
+    if (key == "frames") return stats.frames.has_value();
+    if (key == "frames_per_second") return stats.frames_per_second.has_value();
+    return false;
+}
+
+template<>
+std::string CSVWriter::getValue(const webrtc::RTCVideoSourceStats& stats, const std::string& key) const {
+    // RTCMediaSourceStats members (parent class)
+    if (key == "track_identifier") return static_cast<const webrtc::RTCMediaSourceStats&>(stats).track_identifier.value_or("");
+    if (key == "kind") return static_cast<const webrtc::RTCMediaSourceStats&>(stats).kind.value_or("");
+    
+    // RTCVideoSourceStats members
+    if (key == "width") return std::to_string(stats.width.value_or(0));
+    if (key == "height") return std::to_string(stats.height.value_or(0));
+    if (key == "frames") return std::to_string(stats.frames.value_or(0));
+    if (key == "frames_per_second") return std::to_string(stats.frames_per_second.value_or(0.0));
+    return "";
+}

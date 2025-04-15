@@ -989,6 +989,9 @@ void Conductor::StartLogging() {
     in_rtp_log_ = std::make_unique<CSVWriter>(filename);
     snprintf(filename, sizeof(filename), "%s-out-rtp-%d.csv", prefix.c_str(), my_id_);
     out_rtp_log_ = std::make_unique<CSVWriter>(filename);
+    // Add new video source stats log file
+    snprintf(filename, sizeof(filename), "%s-video-src-%d.csv", prefix.c_str(), my_id_);
+    video_src_log_ = std::make_unique<CSVWriter>(filename);
 
     // Initialize GCC logging
     InitializeGccLogging();    
@@ -1031,6 +1034,9 @@ void Conductor::StartLogging() {
                   << "fir_count,pli_count,nack_count,qp_sum,active,power_efficient_encoder,"
                   << "scalability_mode\n";
 
+    // Video source stats header
+    *video_src_log_ << "timestamp,track_identifier,kind,width,height,frames,frames_per_second\n";
+
     // Start logging thread
     logging_thread_ = std::make_unique<std::thread>(&Conductor::LoggingThread, this);   
   }
@@ -1047,6 +1053,7 @@ void Conductor::StopLogging() {
     pc_log_.reset();
     in_rtp_log_.reset();
     out_rtp_log_.reset();
+    video_src_log_.reset();
   }
 }
 
@@ -1254,9 +1261,23 @@ void Conductor::OnStatsDelivered(
     *out_rtp_log_ << "\n";
   }
 
+  // Log video source stats
+  auto video_source_stats = report->GetStatsOfType<webrtc::RTCVideoSourceStats>();
+  for (const auto& stat : video_source_stats) {
+    *video_src_log_ << timestamp << ",";
+    video_src_log_->writeFromDict(*stat, "track_identifier");
+    video_src_log_->writeFromDict(*stat, "kind");
+    video_src_log_->writeFromDict(*stat, "width");
+    video_src_log_->writeFromDict(*stat, "height");
+    video_src_log_->writeFromDict(*stat, "frames");
+    video_src_log_->writeFromDict(*stat, "frames_per_second");
+    *video_src_log_ << "\n";
+  }  
+
   pc_log_->flush();
   in_rtp_log_->flush();
   out_rtp_log_->flush();
+  video_src_log_->flush();
 }
 
 
