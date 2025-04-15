@@ -642,8 +642,15 @@ void GoogCcNetworkController::MaybeTriggerOnNetworkChanged(
   LossBasedState loss_based_state = bandwidth_estimation_->loss_based_state();
   DataRate pushback_target_rate = loss_based_target_rate;
 
+  // Get the metrics we want to log
+  int64_t outstanding_bytes = 0;
+  TimeDelta time_window = TimeDelta::Zero();
+  DataSize data_window = DataSize::Zero();
+
   double cwnd_reduce_ratio = 0.0;
   if (congestion_window_pushback_controller_) {
+    outstanding_bytes = congestion_window_pushback_controller_->GetOutstandingBytes();
+
     int64_t pushback_rate =
         congestion_window_pushback_controller_->UpdateTargetBitrate(
             loss_based_target_rate.bps());
@@ -656,6 +663,22 @@ void GoogCcNetworkController::MaybeTriggerOnNetworkChanged(
                           loss_based_target_rate.bps();
     }
   }
+
+  // Get the time_window and data_window if they're available
+  if (current_data_window_) {
+    data_window = *current_data_window_;
+    
+    // We need to recalculate time_window using the same logic as in UpdateCongestionWindowSize
+    if (!feedback_max_rtts_.empty()) {
+      TimeDelta min_feedback_max_rtt = TimeDelta::Millis(
+          *std::min_element(feedback_max_rtts_.begin(), feedback_max_rtts_.end()));
+          
+      time_window = min_feedback_max_rtt +
+                    TimeDelta::Millis(
+                        rate_control_settings_.GetCongestionWindowAdditionalTimeMs());
+    }
+  }
+
   DataRate stable_target_rate =
       bandwidth_estimation_->GetEstimatedLinkCapacity();
   stable_target_rate = std::min(stable_target_rate, pushback_target_rate);
@@ -673,10 +696,11 @@ void GoogCcNetworkController::MaybeTriggerOnNetworkChanged(
     last_stable_target_rate_ = stable_target_rate;
     last_loss_base_state_ = loss_based_state;
 
-    // Log network controller metrics
+    // Log network controller metrics with the new parameters
     GccMetricsLogger::GetInstance()->LogNetworkControllerMetrics(
       at_time, loss_based_target_rate, pushback_target_rate, 
-      stable_target_rate, fraction_loss);
+      stable_target_rate, fraction_loss, outstanding_bytes, 
+      time_window, data_window);
 
     alr_detector_->SetEstimatedBitrate(loss_based_target_rate.bps());
 

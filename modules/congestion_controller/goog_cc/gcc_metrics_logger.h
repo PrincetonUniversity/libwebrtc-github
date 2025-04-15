@@ -46,7 +46,10 @@ class GccMetricsLogger {
       DataRate loss_based_target_rate,
       DataRate pushback_target_rate,
       DataRate stable_target_rate,
-      uint8_t fraction_loss);
+      uint8_t fraction_loss,
+      int64_t outstanding_bytes,
+      TimeDelta time_window,
+      DataSize data_window);
 
  private:
   GccMetricsLogger();

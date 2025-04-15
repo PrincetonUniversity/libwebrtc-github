@@ -29,6 +29,7 @@ class CongestionWindowPushbackController {
   explicit CongestionWindowPushbackController(
       const FieldTrialsView& key_value_config);
   void UpdateOutstandingData(int64_t outstanding_bytes);
+  int64_t GetOutstandingBytes() const { return outstanding_bytes_; }
   void UpdatePacingQueue(int64_t pacing_bytes);
   uint32_t UpdateTargetBitrate(uint32_t bitrate_bps);
   void SetDataWindow(DataSize data_window);

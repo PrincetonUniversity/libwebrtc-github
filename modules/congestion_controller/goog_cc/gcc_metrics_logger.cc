@@ -56,7 +56,8 @@ void GccMetricsLogger::SetPeerId(int peer_id) {
 void GccMetricsLogger::WriteHeader() {
   log_file_ << "timestamp_ms,component,peer_id,modified_trend,threshold,bandwidth_state,"
             << "target_bitrate_bps,loss_based_target_rate_bps,"
-            << "pushback_target_rate_bps,stable_target_rate_bps,fraction_loss"
+            << "pushback_target_rate_bps,stable_target_rate_bps,fraction_loss,"
+            << "outstanding_bytes,time_window_ms,data_window_bytes"
             << std::endl;
 }
 
@@ -117,7 +118,10 @@ void GccMetricsLogger::LogNetworkControllerMetrics(
     DataRate loss_based_target_rate,
     DataRate pushback_target_rate,
     DataRate stable_target_rate,
-    uint8_t fraction_loss) {
+    uint8_t fraction_loss,
+    int64_t outstanding_bytes,
+    TimeDelta time_window,
+    DataSize data_window) {
   MutexLock lock(&mutex_);
   if (!is_initialized_ || !log_file_.is_open()) {
     return;
@@ -131,7 +135,10 @@ void GccMetricsLogger::LogNetworkControllerMetrics(
             << loss_based_target_rate.bps() << ","
             << pushback_target_rate.bps() << ","
             << stable_target_rate.bps() << ","
-            << static_cast<int>(fraction_loss)
+            << static_cast<int>(fraction_loss) << ","
+            << outstanding_bytes << ","
+            << time_window.ms() << ","
+            << data_window.bytes()
             << std::endl;
 }
 
