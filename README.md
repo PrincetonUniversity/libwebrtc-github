@@ -1,5 +1,5 @@
 # WebRTC Setup and Configuration Guide
-This is the instrumented WebRTC used by Domino-IMC (https://doi.org/10.1145/3730567.3764434), detailed loggings can be found in [Wiii page](https://github.com/PrincetonUniversity/libwebrtc-github/wiki). This guide provides step-by-step instructions for setting up, configuring, and running the instrumented WebRTC for research purposes.
+This is the instrumented WebRTC used by [Domino-IMC](https://doi.org/10.1145/3730567.3764434), detailed loggings can be found in [Wiki Page](https://github.com/PrincetonUniversity/libwebrtc-github/wiki). This guide provides step-by-step instructions for setting up, configuring, and running the instrumented WebRTC for research purposes.
 
 ## 1. Setup libwebrtc
 
